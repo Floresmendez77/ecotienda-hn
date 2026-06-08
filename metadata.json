@@ -1,0 +1,6 @@
+{
+  "name": "EcoTienda HN",
+  "description": "Una tienda virtual ecológica de nivel profesional para Honduras, con un completo diseño en PHP 8, MySQL y Bootstrap 5.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

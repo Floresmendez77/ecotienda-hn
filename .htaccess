@@ -1,0 +1,61 @@
+# ============================================================
+# 🌱 ECOTIENDA HN — Configuración Apache (.htaccess)
+# ============================================================
+
+Options -Indexes
+ServerSignature Off
+
+# ── Páginas de error personalizadas ──────────────────────────
+ErrorDocument 404 /ecotiendashop/404.php
+ErrorDocument 500 /ecotiendashop/500.php
+ErrorDocument 403 /ecotiendashop/404.php
+
+# ── Reescritura de URL ────────────────────────────────────────
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Redirigir HTTP → HTTPS en producción (descomentar en servidor real)
+    # RewriteCond %{HTTPS} off
+    # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # Permitir acceso directo a archivos y directorios existentes
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+
+    # Front-controller opcional (para futuras rutas limpias)
+    # RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+# ── Proteger archivos sensibles ───────────────────────────────
+<FilesMatch "^\.env">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+<FilesMatch "(composer\.(json|lock)|package(-lock)?\.json|\.gitignore|README\.md)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# ── Headers de seguridad ──────────────────────────────────────
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# ── Compresión GZIP ───────────────────────────────────────────
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript application/json
+</IfModule>
+
+# ── Cache de assets estáticos ─────────────────────────────────
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/jpeg "access plus 1 month"
+    ExpiresByType image/png  "access plus 1 month"
+    ExpiresByType image/webp "access plus 1 month"
+    ExpiresByType text/css   "access plus 1 week"
+    ExpiresByType application/javascript "access plus 1 week"
+</IfModule>
