@@ -1,8 +1,9 @@
 <?php
 /**
- * 🌱 ECOTIENDA HN - CATÁLOGO DE LA TIENDA ECOLÓGICA
+ * 🌱 ECOTIENDA HN - CATÁLOGO ECOLÓGICO (ORGANIC PREMIUM COMMERCE + GSAP MOTION)
  * Ruta: /tienda.php
- * Descripción: Permite buscar, filtrar por categoría, rango de precios, disponibilidad, ordenar y paginar productos desde MySQL.
+ * Descripción: Catálogo ecológico con Búsqueda AJAX, Filtros Sticky, ScrollTrigger Batch Reveal,
+ *              Tilt 3D con luz especular y Microinteracciones GSAP.
  */
 
 $pageTitle = "La EcoTienda - Productos Sostenibles";
@@ -72,7 +73,7 @@ try {
     $totalPages = (int)ceil($totalProducts / $limit);
     if ($totalPages < 1) $totalPages = 1;
 
-    // 4. Agregar Regla de Ordenamiento de forma segura (sin inyección SQL)
+    // 4. Agregar Regla de Ordenamiento de forma segura
     $allowedSorts = [
         'precio_asc' => 'precio_actual ASC',
         'precio_desc' => 'precio_actual DESC',
@@ -108,9 +109,8 @@ if (empty($categories)) {
     ];
 }
 
-// Fallback de Canastas de Productos
+// Fallback de Productos
 if (empty($products) && empty($search) && $catFilter === 0) {
-    // Si no hay productos en BD, poblamos catálogo de demostración para una experiencia de usuario estelar
     $products = [
         [
             'id' => 1, 'nombre' => 'Champú Sólido de Romero y Árbol de Té', 'descripcion_corta' => 'Biodegradable, hecho en Honduras libre de sulfato.', 'precio' => 120.00, 'precio_oferta' => 95.00, 'stock' => 12, 'imagen_principal' => 'https://images.unsplash.com/photo-1608248597481-496100c80836?w=500&auto=format&fit=crop&q=60', 'categoria_nombre' => 'Cuidado Personal', 'categoria_id' => 1
@@ -137,12 +137,40 @@ if (empty($products) && empty($search) && $catFilter === 0) {
 ?>
 
 <div class="container py-5">
+    
+    <!-- ENCABEZADO EDITORIAL & BUSCADOR PROMINENTE (React Bits Style) -->
+    <div class="row mb-5 align-items-center justify-content-between g-4">
+        <div class="col-lg-6">
+            <div class="impact-badge-pill mb-2 px-3 py-1" style="font-size: 0.76rem;">🌱 CATÁLOGO SOSTENIBLE · HONDURAS</div>
+            <h1 class="display-5 font-display fw-extrabold text-white mb-2" style="letter-spacing: -0.03em;">Explora EcoTienda</h1>
+            <p class="text-slate-400 mb-0" style="color: #94a3b8; font-size: 1.05rem;">Productos biodegradables y de origen ético para tu día a día</p>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="position-relative">
+                <span class="position-absolute start-0 top-50 translate-middle-y ps-4 text-slate-400" style="color: #94a3b8; font-size: 1.1rem;">
+                    <i class="fas fa-search"></i>
+                </span>
+                <input type="text" id="ajaxSearch" name="buscar"
+                       class="form-control form-control-lg ps-5 pe-5 rounded-pill"
+                       placeholder="Buscar por nombre, categoría o beneficio..."
+                       value="<?php echo sanitize($search); ?>"
+                       style="min-height: 52px; background: rgba(15, 23, 42, 0.75) !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; backdrop-filter: blur(20px);"
+                       autocomplete="off">
+                <span class="position-absolute end-0 top-50 translate-middle-y pe-4 text-success" id="searchSpinner" style="display:none;">
+                    <i class="fas fa-spinner fa-spin fa-lg"></i>
+                </span>
+            </div>
+        </div>
+    </div>
+
     <div class="row g-4">
-        
-        <!-- BARRA LATERAL DE FILTROS (Desktop) -->
+        <!-- BARRA LATERAL DE FILTROS STICKY (Glass Panel) -->
         <div class="col-lg-3 col-md-4">
-            <div class="card border-0 shadow-sm p-4 sticky-top" style="top: 100px; border-radius: 16px; z-index: 10;">
-                <h5 class="fw-bold mb-4" style="font-family: var(--font-display);"><i class="fas fa-sliders-h me-2 text-success"></i> Filtros</h5>
+            <div class="card border-0 shadow-sm p-4 sticky-top" style="top: 100px; border-radius: 24px; z-index: 10; background: rgba(15, 23, 42, 0.82) !important; backdrop-filter: blur(20px);">
+                <h5 class="fw-bold mb-4 text-white d-flex align-items-center gap-2 font-display">
+                    <i class="fas fa-sliders-h text-success"></i> Filtros
+                </h5>
                 
                 <form action="<?php echo BASE_URL; ?>tienda.php" method="GET" id="filterForm">
                     <!-- Preservar Búsqueda si existe -->
@@ -152,8 +180,8 @@ if (empty($products) && empty($search) && $catFilter === 0) {
 
                     <!-- Categorías -->
                     <div class="mb-4">
-                        <label class="form-label text-secondary small fw-bold mb-2">Categoría</label>
-                        <select name="categoria" class="form-select border-0 bg-light" onchange="document.getElementById('filterForm').submit()">
+                        <label class="form-label text-slate-400 small fw-bold mb-2" style="color: #94a3b8;">Categoría</label>
+                        <select name="categoria" class="form-select border-0" onchange="document.getElementById('filterForm').submit()">
                             <option value="0">Todas las Categorías</option>
                             <?php foreach($categories as $cat): ?>
                                 <option value="<?php echo $cat['id']; ?>" <?php echo $catFilter === (int)$cat['id'] ? 'selected' : ''; ?>>
@@ -165,8 +193,8 @@ if (empty($products) && empty($search) && $catFilter === 0) {
 
                     <!-- Ordenamiento -->
                     <div class="mb-4">
-                        <label class="form-label text-secondary small fw-bold mb-2">Ordenar por</label>
-                        <select name="orden" class="form-select border-0 bg-light" onchange="document.getElementById('filterForm').submit()">
+                        <label class="form-label text-slate-400 small fw-bold mb-2" style="color: #94a3b8;">Ordenar por</label>
+                        <select name="orden" class="form-select border-0" onchange="document.getElementById('filterForm').submit()">
                             <option value="recientes" <?php echo $sort === 'recientes' ? 'selected' : ''; ?>>Más Recientes</option>
                             <option value="precio_asc" <?php echo $sort === 'precio_asc' ? 'selected' : ''; ?>>Precio: Menor a Mayor</option>
                             <option value="precio_desc" <?php echo $sort === 'precio_desc' ? 'selected' : ''; ?>>Precio: Mayor a Menor</option>
@@ -176,11 +204,11 @@ if (empty($products) && empty($search) && $catFilter === 0) {
 
                     <!-- Rango de Precios -->
                     <div class="mb-4">
-                        <label class="form-label text-secondary small fw-bold mb-2">Rango de Precio</label>
+                        <label class="form-label text-slate-400 small fw-bold mb-2" style="color: #94a3b8;">Rango de Precio (L.)</label>
                         <div class="d-flex align-items-center gap-2">
-                            <input type="number" name="min_precio" class="form-control text-center p-1.5 small" placeholder="Mín" value="<?php echo $minPrice > 0 ? $minPrice : ''; ?>">
-                            <span class="text-muted">-</span>
-                            <input type="number" name="max_precio" class="form-control text-center p-1.5 small" placeholder="Máx" value="<?php echo $maxPrice > 0 ? $maxPrice : ''; ?>">
+                            <input type="number" name="min_precio" class="form-control text-center p-2 small" placeholder="Mín" value="<?php echo $minPrice > 0 ? $minPrice : ''; ?>">
+                            <span class="text-slate-500">-</span>
+                            <input type="number" name="max_precio" class="form-control text-center p-2 small" placeholder="Máx" value="<?php echo $maxPrice > 0 ? $maxPrice : ''; ?>">
                         </div>
                     </div>
 
@@ -188,84 +216,76 @@ if (empty($products) && empty($search) && $catFilter === 0) {
                     <div class="mb-4">
                         <div class="form-check">
                             <input type="checkbox" name="disponibilidad" value="disponible" id="disponibilidad" class="form-check-input" <?php echo $stockFilter === 'disponible' ? 'checked' : ''; ?> onchange="document.getElementById('filterForm').submit()">
-                            <label for="disponibilidad" class="form-check-label text-secondary small">Solo en Stock</label>
+                            <label for="disponibilidad" class="form-check-label text-slate-300 small ms-1" style="color: #cbd5e1;">Solo en Stock</label>
                         </div>
                     </div>
 
-                    <!-- Botón Aplicar Manual -->
+                    <!-- Botones Aplicar / Limpiar -->
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-eco-primary btn-sm flex-grow-1">Aplicar</button>
-                        <a href="<?php echo BASE_URL; ?>tienda.php" class="btn btn-outline-secondary btn-sm" title="Limpiar"><i class="fas fa-undo"></i></a>
+                        <a href="<?php echo BASE_URL; ?>tienda.php" class="btn btn-pill-glass btn-sm" title="Limpiar"><i class="fas fa-undo"></i></a>
                     </div>
                 </form>
             </div>
         </div>
 
-        <!-- GRId DE PRODUCTOS -->
+        <!-- PRODUCT GRID -->
         <div class="col-lg-9 col-md-8">
-            <!-- Barra Superior de Búsqueda y Resultados -->
-            <div class="card border-0 shadow-sm p-3 mb-4 d-flex flex-wrap justify-content-between align-items-center gap-3" style="border-radius: 12px;">
-                <div class="text-secondary small" id="resultsCount">
-                    Mostrando <strong class="text-dark"><?php echo count($products); ?></strong> de <strong class="text-dark"><?php echo $totalProducts > 0 ? $totalProducts : count($products); ?></strong> ecoproductos
-                </div>
-
-                <div class="d-flex w-100 w-md-auto ms-auto gap-2 position-relative" style="max-width:400px;">
-                    <input type="text" id="ajaxSearch" name="buscar"
-                           class="form-control form-control-sm"
-                           placeholder="Buscar producto ecológico..."
-                           value="<?php echo sanitize($search); ?>"
-                           style="border-radius: 8px;"
-                           autocomplete="off">
-                    <span class="position-absolute end-0 top-50 translate-middle-y pe-3 text-muted" id="searchSpinner" style="display:none;">
-                        <i class="fas fa-spinner fa-spin"></i>
-                    </span>
+            <!-- Contador de Resultados -->
+            <div class="d-flex align-items-center justify-content-between mb-4">
+                <div class="text-slate-400 small" id="resultsCount" style="color: #94a3b8;">
+                    Mostrando <strong class="text-white"><?php echo count($products); ?></strong> de <strong class="text-white"><?php echo $totalProducts > 0 ? $totalProducts : count($products); ?></strong> ecoproductos
                 </div>
             </div>
 
-            <!-- Catálogo vacio message -->
+            <!-- Catálogo vacío message -->
             <?php if (empty($products)): ?>
                 <div class="text-center py-5" id="productGrid">
-                    <img src="https://placehold.co/150/emerald/white?text=🌱" class="opacity-50 mb-4 rounded-circle" alt="Vacío">
-                    <h4 class="fw-bold">No se encontraron productos</h4>
-                    <p class="text-secondary">Intenta remover o ajustar tus filtros de búsqueda actual</p>
+                    <div class="bg-success bg-opacity-10 text-success p-4 rounded-circle mx-auto mb-4 d-flex align-items-center justify-content-center" style="width: 80px; height: 80px; border: 1px solid rgba(16,185,129,0.3);">
+                        <i class="fas fa-search fa-2x"></i>
+                    </div>
+                    <h4 class="fw-bold text-white font-display">No se encontraron productos</h4>
+                    <p class="text-slate-400" style="color: #94a3b8;">Intenta remover o ajustar tus filtros de búsqueda</p>
                     <a href="<?php echo BASE_URL; ?>tienda.php" class="btn btn-eco-primary mt-2">Limpiar Filtros</a>
                 </div>
             <?php else: ?>
-                <!-- Grid propiamente -->
+                <!-- Grid de productos -->
                 <div class="row g-4" id="productGrid">
                     <?php foreach($products as $prod): ?>
                         <div class="col-xl-4 col-lg-6 col-md-6">
-                            <div class="card h-100 border-0 shadow-sm overflow-hidden" style="border-radius: 16px; transition: transform 0.2s ease, box-shadow 0.2s ease;">
-                                <!-- Insignia Oferta -->
+                            <div class="card h-100 border-0 shadow-sm overflow-hidden" style="border-radius: 24px;">
+                                <!-- Insignia Oferta / Agotado -->
                                 <?php if(!empty($prod['precio_oferta'])): ?>
-                                    <span class="badge bg-danger position-absolute top-0 start-0 m-3 z-3">¡Oferta!</span>
+                                    <span class="badge position-absolute top-0 start-0 m-3 z-3 px-3 py-1.5 rounded-pill" style="background: linear-gradient(135deg, #ef4444, #dc2626); box-shadow: 0 4px 15px rgba(239, 68, 68, 0.5);">¡Oferta!</span>
                                 <?php endif; ?>
 
                                 <?php if($prod['stock'] <= 0): ?>
-                                    <span class="badge bg-secondary position-absolute top-0 end-0 m-3 z-3">Agotado</span>
+                                    <span class="badge bg-secondary position-absolute top-0 end-0 m-3 z-3 px-3 py-1.5 rounded-pill" style="background: rgba(100, 116, 139, 0.8);">Agotado</span>
                                 <?php endif; ?>
 
-                                <div class="position-relative overflow-hidden" style="height: 220px; background-color: #fff;">
-                                    <img src="<?php echo !empty($prod['imagen_principal']) ? BASE_URL . ltrim($prod['imagen_principal'], '/') : 'https://placehold.co/500x500/emerald/white?text=Eco+Tienda'; ?>" class="w-100 h-100 object-fit-cover" alt="<?php echo sanitize($prod['nombre']); ?>">
+                                <div class="position-relative overflow-hidden" style="height: 230px; background-color: #0f172a;">
+                                    <img src="<?php echo !empty($prod['imagen_principal']) ? BASE_URL . ltrim($prod['imagen_principal'], '/') : 'https://placehold.co/500x500/10b981/white?text=EcoTienda'; ?>" 
+                                         class="w-100 h-100 object-fit-cover img-zoom-hover" 
+                                         alt="<?php echo sanitize($prod['nombre']); ?>">
                                 </div>
 
                                 <div class="card-body p-4 d-flex flex-column">
-                                    <span class="text-success small fw-bold mb-1-5"><?php echo sanitize($prod['categoria_nombre'] ?? 'Hogar Verde'); ?></span>
-                                    <h5 class="fw-bold card-title text-truncate-2" style="font-size: 1rem; line-height: 1.4;">
-                                        <a href="<?php echo BASE_URL; ?>producto.php?id=<?php echo $prod['id']; ?>" class="text-decoration-none text-reset hover-success"><?php echo sanitize($prod['nombre']); ?></a>
+                                    <span class="text-success small fw-bold mb-1" style="color: #34d399 !important; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;"><?php echo sanitize($prod['categoria_nombre'] ?? 'Hogar Verde'); ?></span>
+                                    <h5 class="fw-bold card-title text-truncate-2 mb-2" style="font-size: 1rem; line-height: 1.4;">
+                                        <a href="<?php echo BASE_URL; ?>producto.php?id=<?php echo $prod['id']; ?>" class="text-decoration-none text-white hover-emerald"><?php echo sanitize($prod['nombre']); ?></a>
                                     </h5>
-                                    <p class="text-secondary small text-truncate-2 mt-2 mb-4" style="font-size: 0.85rem; flex-grow: 1;">
+                                    <p class="text-slate-400 small text-truncate-2 mb-4" style="font-size: 0.86rem; color: #94a3b8; flex-grow: 1;">
                                         <?php echo sanitize($prod['descripcion_corta']); ?>
                                     </p>
 
                                     <!-- Precios y Botones -->
-                                    <div class="d-flex align-items-center justify-content-between pt-2 border-top border-secondary border-opacity-10 mt-auto">
+                                    <div class="d-flex align-items-center justify-content-between pt-3 border-top border-secondary border-opacity-25 mt-auto">
                                         <div>
                                             <?php if(!empty($prod['precio_oferta'])): ?>
-                                                <span class="text-danger fw-bold m-0" style="font-size: 1.1rem;"><?php echo formatCurrency($prod['precio_oferta']); ?></span>
-                                                <span class="text-secondary text-decoration-line-through small d-block" style="font-size: 0.8rem;"><?php echo formatCurrency($prod['precio']); ?></span>
+                                                <span class="text-danger fw-bold m-0" style="font-size: 1.2rem; color: #f87171 !important;"><?php echo formatCurrency($prod['precio_oferta']); ?></span>
+                                                <span class="text-slate-500 text-decoration-line-through small d-block" style="font-size: 0.8rem; color: #64748b;"><?php echo formatCurrency($prod['precio']); ?></span>
                                             <?php else: ?>
-                                                <span class="fw-bold" style="font-size: 1.1rem;"><?php echo formatCurrency($prod['precio']); ?></span>
+                                                <span class="fw-bold text-white" style="font-size: 1.2rem;"><?php echo formatCurrency($prod['precio']); ?></span>
                                             <?php endif; ?>
                                         </div>
                                         <div class="d-flex gap-2">
@@ -274,10 +294,10 @@ if (empty($products) && empty($search) && $catFilter === 0) {
                                                 class="btn btn-outline-danger btn-sm rounded-circle p-2 fav-btn"
                                                 data-id="<?php echo $prod['id']; ?>"
                                                 title="Favorito"
-                                                style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;">
+                                                style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-color:rgba(239,68,68,0.3);">
                                                 <i class="far fa-heart"></i>
                                             </button>
-                                            <a href="<?php echo BASE_URL; ?>producto.php?id=<?php echo $prod['id']; ?>" class="btn btn-outline-secondary btn-sm rounded-circle p-2" title="Detalles" style="width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;">
+                                            <a href="<?php echo BASE_URL; ?>producto.php?id=<?php echo $prod['id']; ?>" class="btn btn-pill-glass btn-sm rounded-circle p-2" title="Detalles" style="width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;">
                                                 <i class="fas fa-eye"></i>
                                             </a>
                                             
@@ -290,7 +310,7 @@ if (empty($products) && empty($search) && $catFilter === 0) {
                                                     <i class="fas fa-cart-plus"></i>
                                                 </button>
                                             <?php else: ?>
-                                                <button class="btn btn-outline-secondary btn-sm rounded-circle p-2" disabled style="width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;">
+                                                <button class="btn btn-pill-glass btn-sm rounded-circle p-2" disabled style="width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; opacity: 0.5;">
                                                     <i class="fas fa-ban"></i>
                                                 </button>
                                             <?php endif; ?>
@@ -302,25 +322,25 @@ if (empty($products) && empty($search) && $catFilter === 0) {
                     <?php endforeach; ?>
                 </div>
 
-                <!-- PAGINACIÓN -->
+                <!-- PAGINACIÓN GLASSMORPHIC -->
                 <?php if ($totalPages > 1): ?>
                     <nav class="mt-5">
                         <ul class="pagination justify-content-center gap-2">
                             <!-- Anterior -->
                             <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
-                                <a class="page-link border-0 text-dark bg-light rounded" href="<?php echo BASE_URL; ?>tienda.php?pagina=<?php echo $page-1; ?>&categoria=<?php echo $catFilter; ?>&orden=<?php echo $sort; ?>&buscar=<?php echo sanitize($search); ?>"><i class="fas fa-chevron-left"></i></a>
+                                <a class="page-link border-0 text-white rounded-pill px-3" style="background: rgba(255,255,255,0.06);" href="<?php echo BASE_URL; ?>tienda.php?pagina=<?php echo $page-1; ?>&categoria=<?php echo $catFilter; ?>&orden=<?php echo $sort; ?>&buscar=<?php echo sanitize($search); ?>"><i class="fas fa-chevron-left"></i></a>
                             </li>
 
                             <!-- Números -->
                             <?php for($i = 1; $i <= $totalPages; $i++): ?>
                                 <li class="page-item <?php echo $page === $i ? 'active' : ''; ?>">
-                                    <a class="page-link border-0 rounded <?php echo $page === $i ? 'bg-success text-white' : 'text-dark bg-light'; ?>" href="<?php echo BASE_URL; ?>tienda.php?pagina=<?php echo $i; ?>&categoria=<?php echo $catFilter; ?>&orden=<?php echo $sort; ?>&buscar=<?php echo sanitize($search); ?>"><?php echo $i; ?></a>
+                                    <a class="page-link border-0 rounded-pill px-3.5 <?php echo $page === $i ? 'btn-eco-primary text-white' : 'text-white'; ?>" style="<?php echo $page !== $i ? 'background: rgba(255,255,255,0.06);' : ''; ?>" href="<?php echo BASE_URL; ?>tienda.php?pagina=<?php echo $i; ?>&categoria=<?php echo $catFilter; ?>&orden=<?php echo $sort; ?>&buscar=<?php echo sanitize($search); ?>"><?php echo $i; ?></a>
                                 </li>
                             <?php endfor; ?>
 
                             <!-- Siguiente -->
                             <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
-                                <a class="page-link border-0 text-dark bg-light rounded" href="<?php echo BASE_URL; ?>tienda.php?pagina=<?php echo $page+1; ?>&categoria=<?php echo $catFilter; ?>&orden=<?php echo $sort; ?>&buscar=<?php echo sanitize($search); ?>"><i class="fas fa-chevron-right"></i></a>
+                                <a class="page-link border-0 text-white rounded-pill px-3" style="background: rgba(255,255,255,0.06);" href="<?php echo BASE_URL; ?>tienda.php?pagina=<?php echo $page+1; ?>&categoria=<?php echo $catFilter; ?>&orden=<?php echo $sort; ?>&buscar=<?php echo sanitize($search); ?>"><i class="fas fa-chevron-right"></i></a>
                             </li>
                         </ul>
                     </nav>
@@ -339,8 +359,57 @@ require_once __DIR__ . '/includes/footer.php';
 (function () {
     const BASE = '<?php echo BASE_URL; ?>';
     const IS_LOGGED = <?php echo isLoggedIn() ? 'true' : 'false'; ?>;
+    const CSRF_TOKEN = '<?php echo addslashes(generateCsrfToken()); ?>';
     const currentCat = <?php echo $catFilter; ?>;
     const currentSort = '<?php echo sanitize($sort); ?>';
+    const isMobile = window.innerWidth < 768 || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* ── GSAP MOTION INIT PARA TIENDA ─────────────────────────────────────── */
+    function initMotionFeatures() {
+        if (typeof gsap === 'undefined') return;
+
+        // 1. ScrollTrigger Batch Reveal
+        if (typeof ScrollTrigger !== 'undefined') {
+            ScrollTrigger.batch('#productGrid .card', {
+                interval: 0.08,
+                batchMax: 8,
+                onEnter: batch => gsap.fromTo(batch, { opacity: 0, y: 35 }, { opacity: 1, y: 0, duration: 0.65, stagger: 0.08, ease: 'power3.out', overwrite: 'auto' }),
+                start: 'top 90%'
+            });
+        }
+
+        // 2. Tilt 3D + Luz Especular con quickTo
+        if (!isMobile) {
+            document.querySelectorAll('#productGrid .card').forEach(card => {
+                if (card._tiltBound) return;
+                card._tiltBound = true;
+
+                const qRotateX = gsap.quickTo(card, "rotateX", { duration: 0.35, ease: "power2.out" });
+                const qRotateY = gsap.quickTo(card, "rotateY", { duration: 0.35, ease: "power2.out" });
+
+                card.addEventListener('mousemove', function (e) {
+                    const rect = card.getBoundingClientRect();
+                    const x = (e.clientX - rect.left) / rect.width;
+                    const y = (e.clientY - rect.top) / rect.height;
+
+                    card.style.setProperty('--mx', `${(x * 100).toFixed(1)}%`);
+                    card.style.setProperty('--my', `${(y * 100).toFixed(1)}%`);
+
+                    const rotX = -((y - 0.5) * 12);
+                    const rotY = (x - 0.5) * 12;
+
+                    qRotateX(rotX);
+                    qRotateY(rotY);
+                });
+
+                card.addEventListener('mouseleave', function () {
+                    gsap.to(card, { rotateX: 0, rotateY: 0, duration: 0.5, ease: "power3.out" });
+                });
+            });
+        }
+
+        bindFavButtons();
+    }
 
     /* ── AJAX SEARCH ─────────────────────────────────────────────────────── */
     const searchInput = document.getElementById('ajaxSearch');
@@ -351,38 +420,38 @@ require_once __DIR__ . '/includes/footer.php';
     let searchTimer = null;
 
     function renderProductCard(p) {
-        const ofertaBadge = p.en_oferta ? `<span class="badge bg-danger position-absolute top-0 start-0 m-3 z-3">¡Oferta!</span>` : '';
-        const agotadoBadge = p.stock <= 0 ? `<span class="badge bg-secondary position-absolute top-0 end-0 m-3 z-3">Agotado</span>` : '';
+        const ofertaBadge = p.en_oferta ? `<span class="badge position-absolute top-0 start-0 m-3 z-3 px-3 py-1.5 rounded-pill" style="background: linear-gradient(135deg, #ef4444, #dc2626); box-shadow: 0 4px 15px rgba(239, 68, 68, 0.5);">¡Oferta!</span>` : '';
+        const agotadoBadge = p.stock <= 0 ? `<span class="badge bg-secondary position-absolute top-0 end-0 m-3 z-3 px-3 py-1.5 rounded-pill" style="background: rgba(100, 116, 139, 0.8);">Agotado</span>` : '';
         const precioHtml = p.en_oferta
-            ? `<span class="text-danger fw-bold" style="font-size:1.1rem;">${p.precio_fmt}</span>
-               <span class="text-secondary text-decoration-line-through small d-block" style="font-size:.8rem;">${p.precio_orig_fmt}</span>`
-            : `<span class="fw-bold" style="font-size:1.1rem;">${p.precio_fmt}</span>`;
+            ? `<span class="text-danger fw-bold" style="font-size:1.2rem; color:#f87171 !important;">${p.precio_fmt}</span>
+               <span class="text-slate-500 text-decoration-line-through small d-block" style="font-size:.8rem; color:#64748b;">${p.precio_orig_fmt}</span>`
+            : `<span class="fw-bold text-white" style="font-size:1.2rem;">${p.precio_fmt}</span>`;
 
         const addBtn = p.stock > 0
             ? `<button type="button" onclick="addToCart(${p.id}, 1)" class="btn btn-eco-primary btn-sm rounded-circle p-2" style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;" title="Añadir al carrito">
                     <i class="fas fa-cart-plus"></i>
                </button>`
-            : `<button class="btn btn-outline-secondary btn-sm rounded-circle p-2" disabled style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-ban"></i></button>`;
+            : `<button class="btn btn-pill-glass btn-sm rounded-circle p-2" disabled style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;opacity:0.5;"><i class="fas fa-ban"></i></button>`;
 
         return `<div class="col-xl-4 col-lg-6 col-md-6">
-                    <div class="card h-100 border-0 shadow-sm overflow-hidden" style="border-radius:16px;">
+                    <div class="card h-100 border-0 shadow-sm overflow-hidden" style="border-radius:24px;">
                         ${ofertaBadge}${agotadoBadge}
-                        <div class="position-relative overflow-hidden" style="height:220px;background:#fff;">
-                            <img src="${p.imagen_principal}" class="w-100 h-100 object-fit-cover" alt="${p.nombre}">
+                        <div class="position-relative overflow-hidden" style="height:230px;background:#0f172a;">
+                            <img src="${p.imagen_principal}" class="w-100 h-100 object-fit-cover img-zoom-hover" alt="${p.nombre}">
                         </div>
                         <div class="card-body p-4 d-flex flex-column">
-                            <span class="text-success small fw-bold mb-1">${p.categoria_nombre}</span>
-                            <h5 class="fw-bold card-title text-truncate-2" style="font-size:1rem;line-height:1.4;">
-                                <a href="${p.url}" class="text-decoration-none text-reset">${p.nombre}</a>
+                            <span class="text-success small fw-bold mb-1" style="color:#34d399 !important; font-size:0.78rem; text-transform:uppercase; letter-spacing:0.05em;">${p.categoria_nombre || 'Ecológico'}</span>
+                            <h5 class="fw-bold card-title text-truncate-2 mb-2" style="font-size:1rem;line-height:1.4;">
+                                <a href="${p.url}" class="text-decoration-none text-white hover-emerald">${p.nombre}</a>
                             </h5>
-                            <p class="text-secondary small text-truncate-2 mt-2 mb-4" style="font-size:.85rem;flex-grow:1;">${p.descripcion_corta}</p>
-                            <div class="d-flex align-items-center justify-content-between pt-2 border-top border-secondary border-opacity-10 mt-auto">
+                            <p class="text-slate-400 small text-truncate-2 mb-4" style="font-size:.86rem;color:#94a3b8;flex-grow:1;">${p.descripcion_corta}</p>
+                            <div class="d-flex align-items-center justify-content-between pt-3 border-top border-secondary border-opacity-25 mt-auto">
                                 <div>${precioHtml}</div>
                                 <div class="d-flex gap-2">
-                                    <button class="btn btn-outline-danger btn-sm rounded-circle p-2 fav-btn" data-id="${p.id}" title="Favorito" style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;">
+                                    <button class="btn btn-outline-danger btn-sm rounded-circle p-2 fav-btn" data-id="${p.id}" title="Favorito" style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-color:rgba(239,68,68,0.3);">
                                         <i class="far fa-heart"></i>
                                     </button>
-                                    <a href="${p.url}" class="btn btn-outline-secondary btn-sm rounded-circle p-2" title="Detalles" style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;">
+                                    <a href="${p.url}" class="btn btn-pill-glass btn-sm rounded-circle p-2" title="Detalles" style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;">
                                         <i class="fas fa-eye"></i>
                                     </a>
                                     ${addBtn}
@@ -405,15 +474,15 @@ require_once __DIR__ . '/includes/footer.php';
                 const prods = data.productos;
                 if (prods.length === 0) {
                     gridWrap.innerHTML = `<div class="col-12 text-center py-5">
-                        <i class="fas fa-search fa-3x text-muted mb-3"></i>
-                        <h5 class="fw-bold">Sin resultados para "${q}"</h5>
-                        <p class="text-secondary">Prueba con otro término o limpia los filtros.</p>
+                        <i class="fas fa-search fa-3x text-emerald-400 mb-3" style="color:#10b981;"></i>
+                        <h5 class="fw-bold text-white font-display">Sin resultados para "${q}"</h5>
+                        <p class="text-slate-400" style="color:#94a3b8;">Prueba con otro término de búsqueda o limpia los filtros.</p>
                     </div>`;
                 } else {
                     gridWrap.innerHTML = prods.map(renderProductCard).join('');
-                    bindFavButtons();
+                    initMotionFeatures();
                 }
-                countEl && (countEl.innerHTML = `Mostrando <strong class="text-dark">${prods.length}</strong> ecoproductos`);
+                countEl && (countEl.innerHTML = `Mostrando <strong class="text-white">${prods.length}</strong> ecoproductos`);
             })
             .catch(() => { spinner && (spinner.style.display = 'none'); });
     }
@@ -426,21 +495,32 @@ require_once __DIR__ . '/includes/footer.php';
         });
     }
 
-    /* ── FAVORITOS ────────────────────────────────────────────────────────── */
+    /* ── FAVORITOS CON POP ELÁSTICO ───────────────────────────────────────── */
     function bindFavButtons() {
         document.querySelectorAll('.fav-btn').forEach(btn => {
+            if (btn._favBound) return;
+            btn._favBound = true;
+
             btn.addEventListener('click', function () {
+                const icon = this.querySelector('i');
+
+                if (typeof gsap !== 'undefined' && icon) {
+                    gsap.fromTo(icon, 
+                        { scale: 0.6 }, 
+                        { scale: 1.45, duration: 0.45, ease: 'elastic.out(1.2, 0.4)', onComplete: () => gsap.to(icon, { scale: 1, duration: 0.2 }) }
+                    );
+                }
+
                 if (!IS_LOGGED) {
                     window.location.href = BASE + 'login.php';
                     return;
                 }
                 const pid = this.dataset.id;
-                const icon = this.querySelector('i');
-                const isFav = icon.classList.contains('fas');
+                if (!pid) return;
 
                 fetch(BASE + 'api/favoritos.php', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
                     body: JSON.stringify({ producto_id: parseInt(pid) })
                 })
                 .then(r => r.json())
@@ -451,12 +531,13 @@ require_once __DIR__ . '/includes/footer.php';
                     }
                     if (data.favorito) {
                         icon.classList.replace('far', 'fas');
-                        btn.classList.replace('btn-outline-danger', 'btn-danger');
+                        btn.style.background = '#ef4444';
+                        btn.style.color = '#fff';
                     } else {
                         icon.classList.replace('fas', 'far');
-                        btn.classList.replace('btn-danger', 'btn-outline-danger');
+                        btn.style.background = 'transparent';
+                        btn.style.color = '#ef4444';
                     }
-                    // Toast ligero
                     showToast(data.message);
                 });
             });
@@ -468,7 +549,7 @@ require_once __DIR__ . '/includes/footer.php';
         if (!t) {
             t = document.createElement('div');
             t.id = 'ecoToast';
-            t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;background:#064e3b;color:#fff;padding:12px 20px;border-radius:10px;font-size:.9rem;box-shadow:0 4px 20px rgba(0,0,0,.3);transition:opacity .3s ease;';
+            t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;background:rgba(15,23,42,0.95);backdrop-filter:blur(20px);color:#fff;border:1px solid rgba(16,185,129,0.4);padding:14px 24px;border-radius:9999px;font-size:.9rem;box-shadow:0 10px 35px rgba(0,0,0,.7);transition:opacity .3s ease;';
             document.body.appendChild(t);
         }
         t.textContent = msg;
@@ -477,8 +558,6 @@ require_once __DIR__ . '/includes/footer.php';
         t._timer = setTimeout(() => t.style.opacity = '0', 2800);
     }
 
-    // Enlazar corazones iniciales (renderizados por PHP)
-    bindFavButtons();
-
+    document.addEventListener('DOMContentLoaded', initMotionFeatures);
 })();
 </script>

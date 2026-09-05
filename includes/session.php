@@ -48,7 +48,7 @@ function isCliente() {
 function requireLogin() {
     if (!isLoggedIn()) {
         $_SESSION['redirect_after_login'] = $_SERVER['REQUEST_URI'];
-        header("Location: /login.php");
+        header("Location: " . (defined("BASE_URL") ? BASE_URL : "/") . "login.php");
         exit;
     }
 }
@@ -59,7 +59,7 @@ function requireLogin() {
 function requireAdmin() {
     requireLogin();
     if (!isAdmin()) {
-        header("Location: /index.php?error=no_authorized");
+        header("Location: " . (defined("BASE_URL") ? BASE_URL : "/") . "index.php?error=no_authorized");
         exit;
     }
 }

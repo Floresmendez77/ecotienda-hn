@@ -22,6 +22,9 @@ $success = '';
 $error   = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        $error = 'Token de seguridad inválido o expirado. Recargá la página e intentá de nuevo.';
+    } else {
     $correo = filter_input(INPUT_POST, 'correo', FILTER_SANITIZE_EMAIL);
 
     if (empty($correo) || !filter_var($correo, FILTER_VALIDATE_EMAIL)) {
@@ -50,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $ins->execute([$user['id'], $accion]);
 
                 // Construir enlace de restablecimiento
-                $resetLink = rtrim('http' . (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 's' : '') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'), '/') . BASE_URL . 'reset_password.php?token=' . urlencode($token);
+                $resetLink = site_url('reset_password.php?token=' . urlencode($token));
 
                 // Enviar email con PHPMailer
                 $nombre  = htmlspecialchars($user['nombre']);
@@ -111,6 +114,7 @@ HTML;
             $error = 'Ocurrió un error al procesar tu solicitud. Por favor intenta de nuevo.';
         }
     }
+    }
 }
 
 require_once __DIR__ . '/includes/navbar.php';
@@ -154,6 +158,7 @@ require_once __DIR__ . '/includes/navbar.php';
                 <?php if (empty($success)): ?>
                 <!-- Formulario -->
                 <form method="POST" action="" novalidate>
+                    <?php echo csrfField(); ?>
                     <div class="mb-4">
                         <label for="correo" class="form-label fw-semibold small text-secondary">
                             <i class="fas fa-envelope me-1"></i> Correo electrónico

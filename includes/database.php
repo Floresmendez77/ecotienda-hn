@@ -31,7 +31,7 @@ class Database {
                 error_log("Error de conexión de base de datos en EcoTienda HN: " . $e->getMessage());
                 die('<div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px; color: #333;">
                         <h2 style="color: #2e7d32;">🌱 EcoTienda HN - Error del Sistema</h2>
-                        <p>No se pudo conectar con la base de datos local (puerto ' . DB_PORT . '). Asegúrate de que MySQL esté activo en XAMPP.</p>
+                        <p>No se pudo conectar con la base de datos. Por favor intenta más tarde.</p>
                         <p style="font-size: 13px; color: #777;">Detalle técnico: ' . htmlspecialchars($e->getMessage()) . '</p>
                      </div>');
             }

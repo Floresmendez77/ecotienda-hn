@@ -6,9 +6,9 @@ Options -Indexes
 ServerSignature Off
 
 # ── Páginas de error personalizadas ──────────────────────────
-ErrorDocument 404 /ecotiendashop/404.php
-ErrorDocument 500 /ecotiendashop/500.php
-ErrorDocument 403 /ecotiendashop/404.php
+ErrorDocument 404 /404.php
+ErrorDocument 500 /500.php
+ErrorDocument 403 /404.php
 
 # ── Reescritura de URL ────────────────────────────────────────
 <IfModule mod_rewrite.c>
@@ -43,6 +43,20 @@ ErrorDocument 403 /ecotiendashop/404.php
     Header always set X-Frame-Options "SAMEORIGIN"
     Header always set X-XSS-Protection "1; mode=block"
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Strict-Transport-Security (HSTS): le dice al navegador que SIEMPRE
+    # use HTTPS con este dominio durante 1 año (31536000 s), incluyendo
+    # subdominios.
+    #
+    # NOTA (Fase 7): en AlwaysData, Apache está detrás de su propio proxy
+    # frontend y la petición le llega como HTTP normal — el proxy indica
+    # que el visitante usó HTTPS mediante la cabecera X-Forwarded-Proto.
+    # (La versión anterior combinaba esta condición con %{HTTPS} == 'on'
+    # usando OR, y esa expresión compuesta provocó un Error 500 en este
+    # hosting. Esta versión usa una sola condición simple, ya probada.)
+    <If "%{HTTP:X-Forwarded-Proto} == 'https'">
+        Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    </If>
 </IfModule>
 
 # ── Compresión GZIP ───────────────────────────────────────────

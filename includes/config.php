@@ -73,6 +73,13 @@ define('MAIL_FROM_NAME', $_ENV['MAIL_FROM_NAME'] ?? 'EcoTienda HN');
 define('MAIL_ENABLED',   filter_var($_ENV['MAIL_ENABLED'] ?? 'true', FILTER_VALIDATE_BOOLEAN));
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── PayPal (Sandbox) ──────────────────────────────────────────────────────────
+define('PAYPAL_CLIENT_ID',     $_ENV['PAYPAL_CLIENT_ID']     ?? '');
+define('PAYPAL_CLIENT_SECRET', $_ENV['PAYPAL_CLIENT_SECRET'] ?? '');
+define('PAYPAL_API_BASE',      $_ENV['PAYPAL_API_BASE']      ?? 'https://api-m.sandbox.paypal.com');
+define('PAYPAL_EXCHANGE_RATE', (float)($_ENV['PAYPAL_EXCHANGE_RATE'] ?? 26.85));
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Iniciar sesión de forma segura si no está iniciada
 if (session_status() === PHP_SESSION_NONE) {
     $isSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
@@ -89,4 +96,29 @@ if (session_status() === PHP_SESSION_NONE) {
     ]);
 
     session_start();
+}
+
+// ── Cabeceras de seguridad (aplican a todas las páginas: público, admin y API) ─
+// Solo se envían si aún no se mandó ninguna salida (evita "headers already sent").
+if (!headers_sent()) {
+    // Content-Security-Policy: restringido a los CDNs que el sitio realmente usa.
+    // script-src/style-src: Bootstrap (jsdelivr), Font Awesome (cdnjs), Leaflet (unpkg, solo en contacto.php)
+    // font-src: Google Fonts (googleapis + gstatic)
+    // img-src: placeholders (placehold.co) e imágenes de stock (unsplash) + 'self' + data: (imágenes en base64 si las hay)
+    // connect-src: 'self' para las llamadas fetch() a api/*.php del propio sitio
+    $csp = "default-src 'self'; "
+         . "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; "
+         . "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://fonts.googleapis.com; "
+         . "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; "
+         . "img-src 'self' data: https://placehold.co https://images.unsplash.com https://*.tile.openstreetmap.org; "
+         . "connect-src 'self'; "
+         . "frame-ancestors 'self'; "
+         . "base-uri 'self'; "
+         . "form-action 'self';";
+    header("Content-Security-Policy: {$csp}");
+
+    // Cabeceras adicionales que complementan la CSP (defensa en profundidad)
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: SAMEORIGIN');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
 }

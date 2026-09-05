@@ -13,6 +13,7 @@ require_once __DIR__ . '/../includes/functions.php';
 requireAdmin();
 
 $pageTitle = "Control de Inventarios";
+$pageSubtitle = "🌱 Auditoría cronológica de entradas y salidas de stock.";
 $error = '';
 $success = '';
 
@@ -92,159 +93,17 @@ if (empty($movementsList)) {
 }
 ?>
 
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Inventario | Admin EcoTienda</title>
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
-    <style>
-        :root {
-            --admin-primary: #10b981;
-            --admin-secondary: #0f172a;
-            --admin-dark-card: #1e293b;
-            --admin-border-color: rgba(255, 255, 255, 0.08);
-            --font-sans: 'Plus Jakarta Sans', sans-serif;
-            --font-display: 'Space Grotesk', sans-serif;
-        }
+<?php require_once __DIR__ . '/includes/admin_navbar.php'; ?>
 
-        body {
-            font-family: var(--font-sans);
-            background-color: #0b0f19;
-            color: #f1f5f9;
-            min-height: 100vh;
-        }
-
-        .sidebar {
-            width: 260px;
-            background-color: var(--admin-secondary);
-            border-right: 1px solid var(--admin-border-color);
-            min-height: 100vh;
-            position: fixed;
-            top: 0;
-            left: 0;
-            z-index: 1020;
-        }
-
-        .sidebar-brand {
-            font-family: var(--font-display);
-            font-weight: 700;
-            font-size: 1.25rem;
-            color: var(--admin-primary) !important;
-            padding: 1.5rem;
-            display: flex;
-            align-items: center;
-            border-bottom: 1px solid var(--admin-border-color);
-        }
-
-        .sidebar-menu {
-            list-style: none;
-            padding: 1rem 0;
-            margin: 0;
-        }
-
-        .sidebar-item a {
-            padding: 0.85rem 1.5rem;
-            display: flex;
-            align-items: center;
-            color: #cbd5e1;
-            text-decoration: none;
-            font-weight: 500;
-            font-size: 0.92rem;
-            border-left: 3px solid transparent;
-            transition: all 0.2s ease;
-        }
-
-        .sidebar-item a:hover, .sidebar-item.active a {
-            color: #fff;
-            background-color: rgba(16, 185, 129, 0.08);
-            border-left-color: var(--admin-primary);
-        }
-
-        .sidebar-item i {
-            width: 25px;
-            font-size: 1.1rem;
-        }
-
-        .main-content {
-            margin-left: 260px;
-            padding: 2rem;
-            min-height: 100vh;
-        }
-
-        .admin-card {
-            background-color: var(--admin-dark-card);
-            border: 1px solid var(--admin-border-color);
-            border-radius: 16px;
-            padding: 1.5rem;
-        }
-        
-        .table {
-            color: #fff;
-            border-color: rgba(255,255,255,0.05);
-        }
-    </style>
-</head>
-<body>
-
-<!-- SIDEBAR -->
-<div class="sidebar">
-    <a href="<?php echo BASE_URL; ?>admin/index.php" class="sidebar-brand text-decoration-none">
-        <i class="fas fa-leaf text-success me-2"></i>
-        <span>EcoTienda <span class="text-success">Admin</span></span>
-    </a>
-    <ul class="sidebar-menu">
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/index.php"><i class="fas fa-gauge-high"></i> Dashboard</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/productos.php"><i class="fas fa-box"></i> Productos</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/categorias.php"><i class="fas fa-tags"></i> Categorías</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/usuarios.php"><i class="fas fa-users"></i> Usuarios</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/pedidos.php"><i class="fas fa-shopping-bag"></i> Pedidos</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/reportes.php"><i class="fas fa-chart-line"></i> Reportes</a>
-        </li>
-        <li class="sidebar-item active">
-            <a href="<?php echo BASE_URL; ?>admin/inventario.php"><i class="fas fa-warehouse"></i> Inventario</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/configuracion.php"><i class="fas fa-cog"></i> Configuración</a>
-        </li>
-        <li class="sidebar-item mt-4">
-            <a href="<?php echo BASE_URL; ?>index.php" class="text-success"><i class="fas fa-store"></i> Volver a Comercio</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>logout.php" class="text-danger"><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</a>
-        </li>
-    </ul>
-</div>
-
-<!-- CONTENIDO PRINCIPAL -->
-<div class="main-content text-start">
-    
-    <header class="mb-5 pb-3 border-bottom border-secondary border-opacity-10 d-flex justify-content-between align-items-center">
-        <div>
-            <h1 class="h3 fw-bold m-0" style="font-family: var(--font-display);">Kardex de Bodega</h1>
-            <p class="text-secondary small mb-0">🌱 Auditoría cronológica de entradas y salidas de stock.</p>
-        </div>
+    <div class="d-flex justify-content-end mb-4">
         <button class="btn btn-sm btn-eco-primary d-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#adjustStockModal">
             <i class="fas fa-sliders"></i> Registrar Ajuste de Existencia
         </button>
-    </header>
+    </div>
+
+<div class="text-start">
+    
+    
 
     <?php if(!empty($error)): ?>
         <?php echo renderAlert($error, 'danger'); ?>
@@ -255,41 +114,41 @@ if (empty($movementsList)) {
     <?php endif; ?>
 
     <div class="admin-card">
-        <h5 class="fw-bold mb-4" style="font-family: var(--font-display);"><i class="fas fa-history text-secondary me-2"></i> Últimos 15 Movimientos Auditados</h5>
+        <h5 class="fw-bold mb-4" style="font-family: var(--font-display); color: #f1f5f9;"><i class="fas fa-history me-2" style="color:#475569;"></i> Últimos 15 Movimientos Auditados</h5>
         
         <div class="table-responsive">
-            <table class="table align-middle">
-                <thead class="text-secondary small font-mono">
+            <table class="inv-table">
+                <thead>
                     <tr>
-                        <th scope="col" class="border-0">ID Ajuste</th>
-                        <th scope="col" class="border-0">EcoProducto Relacionado</th>
-                        <th scope="col" class="border-0 text-center">Tipo de Movimiento</th>
-                        <th scope="col" class="border-0 text-center">Cantidad</th>
-                        <th scope="col" class="border-0">Fecha / Hora</th>
-                        <th scope="col" class="border-0">Observación u Origen</th>
+                        <th>ID Ajuste</th>
+                        <th>EcoProducto Relacionado</th>
+                        <th class="text-center">Tipo de Movimiento</th>
+                        <th class="text-center">Cantidad</th>
+                        <th>Fecha / Hora</th>
+                        <th>Observación u Origen</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach($movementsList as $mov): ?>
                         <tr>
-                            <td class="font-mono py-2.5">#<?php echo $mov['id']; ?></td>
-                            <td>
-                                <strong class="text-white"><?php echo sanitize($mov['producto_nombre'] ?? 'Producto Descatalogado'); ?></strong>
+                            <td class="cell-id">#<?php echo $mov['id']; ?></td>
+                            <td class="cell-product">
+                                <strong><?php echo sanitize($mov['producto_nombre'] ?? 'Producto Descatalogado'); ?></strong>
                             </td>
-                            <td class="text-center">
+                            <td class="cell-center">
                                 <?php if($mov['tipo_movimiento'] === 'entrada'): ?>
-                                    <span class="badge bg-success bg-opacity-15 text-success py-1 px-2.5 text-xs"><i class="fas fa-arrow-turn-down me-1"></i> Entrada</span>
+                                    <span class="badge-entrada"><i class="fas fa-arrow-turn-down"></i> Entrada</span>
                                 <?php else: ?>
-                                    <span class="badge bg-danger bg-opacity-15 text-danger py-1 px-2.5 text-xs"><i class="fas fa-arrow-turn-up me-1"></i> Salida</span>
+                                    <span class="badge-salida"><i class="fas fa-arrow-turn-up"></i> Salida</span>
                                 <?php endif; ?>
                             </td>
-                            <td class="text-center font-mono text-white fw-bold">
+                            <td class="cell-qty">
                                 <?php echo $mov['cantidad']; ?> uds
                             </td>
-                            <td class="small text-secondary">
+                            <td class="cell-date">
                                 <?php echo date('Y-m-d h:i A', strtotime($mov['fecha'])); ?>
                             </td>
-                            <td class="small text-secondary text-wrap">
+                            <td class="cell-desc">
                                 <?php echo sanitize($mov['descripcion'] ?? '-'); ?>
                             </td>
                         </tr>
@@ -301,8 +160,9 @@ if (empty($movementsList)) {
 
 </div>
 
+
 <!-- MODAL REGISTRO AJUSTE MANUAL -->
-<div class="modal fade text-dark" id="adjustStockModal" tabindex="-1" aria-labelledby="adjustLabel" aria-hidden="true">
+<div class="modal fade" id="adjustStockModal" tabindex="-1" aria-labelledby="adjustLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
@@ -350,6 +210,5 @@ if (empty($movementsList)) {
 </div>
 
 <!-- Bootstrap Bundle JS -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+
+<?php require_once __DIR__ . '/includes/admin_footer.php'; ?>

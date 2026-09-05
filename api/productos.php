@@ -69,7 +69,7 @@ try {
             'precio_fmt'       => 'L. ' . number_format($p['precio_actual'], 2, '.', ','),
             'precio_orig_fmt'  => 'L. ' . number_format($p['precio'], 2, '.', ','),
             'stock'            => (int)$p['stock'],
-            'imagen_principal' => $p['imagen_principal'] ? BASE_URL . ltrim($p['imagen_principal'], '/') : 'https://placehold.co/500x500/10b981/white?text=🌿',
+            'imagen_principal' => $p['imagen_principal'] ? BASE_URL . ltrim($p['imagen_principal'], '/') : 'https://placehold.co/500x500/10b981/white?text=%F0%9F%8C%BF',
             'categoria_nombre' => $p['categoria_nombre'] ?? '',
             'en_oferta'        => !empty($p['precio_oferta']),
             'url'              => BASE_URL . 'producto.php?id=' . $p['id'],

@@ -36,6 +36,9 @@ try {
 
 // Procesar actualización de Información General (POST)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_info') {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        $error = "Token de seguridad inválido o expirado. Recargá la página e intentá de nuevo.";
+    } else {
     $nombre = filter_input(INPUT_POST, 'nombre', FILTER_DEFAULT);
     $apellido = filter_input(INPUT_POST, 'apellido', FILTER_DEFAULT);
     $telefono = filter_input(INPUT_POST, 'telefono', FILTER_DEFAULT);
@@ -66,10 +69,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $error = "Error al guardar cambios: " . $e->getMessage();
         }
     }
+    }
 }
 
 // Procesar actualización de Contraseña (POST)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_pass') {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        $error = "Token de seguridad inválido o expirado. Recargá la página e intentá de nuevo.";
+    } else {
     $current_pass = $_POST['current_pass'] ?? '';
     $new_pass = $_POST['new_pass'] ?? '';
     $confirm_pass = $_POST['confirm_pass'] ?? '';
@@ -100,6 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         } catch (Exception $e) {
             $error = "Error al actualizar contraseña: " . $e->getMessage();
         }
+    }
     }
 }
 ?>
@@ -147,6 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 <h5 class="fw-bold mb-4" style="font-family: var(--font-display);"><i class="fas fa-id-card text-success me-2"></i> Datos Personales</h5>
                 
                 <form action="<?php echo BASE_URL; ?>perfil.php" method="POST">
+                    <?php echo csrfField(); ?>
                     <input type="hidden" name="action" value="update_info">
                     
                     <div class="row g-3">
@@ -180,6 +189,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 <h5 class="fw-bold mb-4" style="font-family: var(--font-display);"><i class="fas fa-shield-halved text-success me-2"></i> Cambiar Contraseña</h5>
                 
                 <form action="<?php echo BASE_URL; ?>perfil.php" method="POST">
+                    <?php echo csrfField(); ?>
                     <input type="hidden" name="action" value="update_pass">
 
                     <div class="row g-3">

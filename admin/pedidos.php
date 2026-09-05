@@ -1,8 +1,7 @@
 <?php
 /**
- * 🌱 ECOTIENDA HN - ADMINISTRACIÓN DE PEDIDOS Y PAGOS
+ * 🌱 ECOTIENDA HN - ADMINISTRACIÓN DE PEDIDOS
  * Ruta: /admin/pedidos.php
- * Descripción: Permite verificar justificativos bancarios, aprobar pagos en la tabla MySQL y coordinar despachos ecológicos en Honduras.
  */
 
 require_once __DIR__ . '/../includes/config.php';
@@ -10,398 +9,370 @@ require_once __DIR__ . '/../includes/database.php';
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-// Validar que el usuario sea Admin
 requireAdmin();
 
 $pageTitle = "Gestión de Pedidos";
+$pageSubtitle = "🌱 Concilia transferencias, aprueba comprobantes y actualiza estados de transporte.";
 $error = '';
 $success = '';
 
 $db = Database::getConnection();
 
-// Procesar Actualización del Estado de Pedidos u Homologación de Pagos (POST)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    $action = $_POST['action'];
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        $error = "Token de seguridad inválido o expirado. Recargá la página e intentá de nuevo.";
+    } else {
+    $action    = $_POST['action'];
     $pedido_id = (int)$_POST['pedido_id'];
-
     try {
         if ($action === 'update_order_state') {
             $nuevo_estado = $_POST['estado'] ?? 'pendiente';
-            
-            $stmt = $db->prepare("UPDATE pedidos SET estado = :estado WHERE id = :id");
-            $stmt->execute([
-                ':estado' => $nuevo_estado,
-                ':id' => $pedido_id
-            ]);
-
+            $db->prepare("UPDATE pedidos SET estado = :estado WHERE id = :id")
+               ->execute([':estado' => $nuevo_estado, ':id' => $pedido_id]);
             require_once __DIR__ . '/../includes/mailer.php';
-              notify_estado_pedido($db, $pedido_id, $nuevo_estado);
-
-            logAuditoria($_SESSION['user_id'], "Actualizó estado de Pedido #{$pedido_id} a {$nuevo_estado}", "pedidos");
-            $success = "El estado del pedido #{$pedido_id} fue modificado a '{$nuevo_estado}' correctamente.";
-
+            notify_estado_pedido($db, $pedido_id, $nuevo_estado);
+            logAuditoria($_SESSION['user_id'], "Actualizó estado Pedido #{$pedido_id} a {$nuevo_estado}", "pedidos");
+            registrarHistorialPedido($db, $pedido_id, $nuevo_estado, 'Actualizado por el administrador', $_SESSION['user_id']);
+            $success = "Estado del pedido #{$pedido_id} actualizado a '{$nuevo_estado}'.";
         } elseif ($action === 'approve_payment') {
             $pago_estado = $_POST['pago_estado'] ?? 'pendiente';
-            
-            // Actualizar tabla pagos
-            $pagoStmt = $db->prepare("UPDATE pagos SET estado = :estado WHERE pedido_id = :pedido_id");
-            $pagoStmt->execute([
-                ':estado' => $pago_estado,
-                ':pedido_id' => $pedido_id
-            ]);
 
-            // Si se aprueba el pago, actualizamos automáticamente el pedido a 'pagado'
-            if ($pago_estado === 'aprobado') {
-                $pedStmt = $db->prepare("UPDATE pedidos SET estado = 'pagado' WHERE id = :id");
-                $pedStmt->execute([':id' => $pedido_id]);
-                logAuditoria($_SESSION['user_id'], "Aprobó pago del Pedido #{$pedido_id}", "pagos");
-                $success = "El pago de la transferencia fue APROBADO. El pedido se configuró como PAGADO.";
-            } else {
-                logAuditoria($_SESSION['user_id'], "Modificó pago a pendiente/rechazado en Pedido #{$pedido_id}", "pagos");
-                $success = "El estado de conciliación bancaria se actualizó a '{$pago_estado}'.";
+            // Estado ANTERIOR del pago, para saber si el stock ya se había
+            // devuelto (venía de 'rechazado') o si esta es la primera vez
+            // que se rechaza (hay que devolverlo). En cualquier otro punto
+            // del flujo (checkout.php del sitio, o checkout-pago-manual.php
+            // / checkout-capturar-pago.php de la app) el stock ya se
+            // descontó antes de que exista esta fila en `pagos`.
+            $pagoAnteriorStmt = $db->prepare("SELECT estado FROM pagos WHERE pedido_id = :id LIMIT 1");
+            $pagoAnteriorStmt->execute([':id' => $pedido_id]);
+            $pagoEstadoAnterior = $pagoAnteriorStmt->fetchColumn();
+
+            $db->beginTransaction();
+            try {
+                $db->prepare("UPDATE pagos SET estado = :estado WHERE pedido_id = :pedido_id")
+                   ->execute([':estado' => $pago_estado, ':pedido_id' => $pedido_id]);
+
+                if ($pago_estado === 'aprobado') {
+                    $db->prepare("UPDATE pedidos SET estado = 'pagado' WHERE id = :id")->execute([':id' => $pedido_id]);
+
+                    // Si venía de estar rechazado (stock ya devuelto), hay
+                    // que volver a descontarlo antes de aprobar.
+                    if ($pagoEstadoAnterior === 'rechazado') {
+                        descontarStockPedido($db, $pedido_id, 'Reversión de rechazo: pago vuelto a aprobar');
+                    }
+
+                    $db->commit();
+                    logAuditoria($_SESSION['user_id'], "Aprobó pago Pedido #{$pedido_id}", "pagos");
+                    registrarHistorialPedido($db, $pedido_id, 'pagado', 'Pago conciliado y aprobado por el administrador', $_SESSION['user_id']);
+                    $success = "Pago APROBADO. Pedido configurado como PAGADO.";
+
+                } elseif ($pago_estado === 'rechazado' && $pagoEstadoAnterior !== 'rechazado') {
+                    // Primera vez que se rechaza: se devuelve el stock que
+                    // había quedado reservado para este pedido.
+                    restaurarStockPedido($db, $pedido_id, 'Pago rechazado: se devuelve stock reservado');
+
+                    $db->commit();
+                    logAuditoria($_SESSION['user_id'], "Rechazó pago Pedido #{$pedido_id} (stock devuelto)", "pagos");
+                    registrarHistorialPedido($db, $pedido_id, 'pago_rechazado', 'Comprobante rechazado por el administrador', $_SESSION['user_id']);
+                    $success = "Pago RECHAZADO. El stock reservado fue devuelto al inventario.";
+
+                } else {
+                    $db->commit();
+                    logAuditoria($_SESSION['user_id'], "Modificó pago Pedido #{$pedido_id}", "pagos");
+                    $success = "Estado de conciliación actualizado a '{$pago_estado}'.";
+                }
+            } catch (StockInsuficienteException $e) {
+                $db->rollBack();
+                $error = "No se pudo aprobar: " . $e->getMessage() . " Ajusta el inventario o contacta al cliente antes de reintentar.";
+            } catch (Exception $e) {
+                $db->rollBack();
+                throw $e;
             }
         }
     } catch (Exception $e) {
-        $error = "Error al procesar actualización de pedidos: " . $e->getMessage();
+        $error = "Error al procesar: " . $e->getMessage();
+    }
     }
 }
 
-// Cargar Todos los Pedidos con Datos de Clientes y Pagos
 $pedidosList = [];
-
+$historialPorPedido = [];
 try {
-    $sql = "SELECT p.*, u.nombre, u.apellido, u.correo, u.telefono,
-            pa.referencia AS pago_ref, pa.estado AS pago_estado, mp.nombre AS met_nombre
+    // LEFT JOIN (antes era INNER JOIN): los pedidos de invitado desde la
+    // app (usuario_id = NULL, Fase 7 - pago manual) no tienen fila en
+    // `usuarios`, así que con INNER JOIN quedaban completamente fuera de
+    // esta lista y el admin nunca los veía para aprobarlos. Con LEFT JOIN
+    // aparecen igual, usando correo_invitado como respaldo del correo.
+    $pedidosList = $db->query("SELECT p.*,
+            u.nombre, u.apellido, u.telefono,
+            COALESCE(u.correo, p.correo_invitado) AS correo,
+            pa.referencia AS pago_ref, pa.estado AS pago_estado, pa.comprobante_imagen,
+            mp.nombre AS met_nombre
             FROM pedidos p
-            INNER JOIN usuarios u ON p.usuario_id = u.id
+            LEFT JOIN usuarios u ON p.usuario_id = u.id
             LEFT JOIN pagos pa ON p.id = pa.pedido_id
             LEFT JOIN metodos_pago mp ON pa.metodo_pago_id = mp.id
-            ORDER BY p.fecha DESC";
-    $pedidosList = $db->query($sql)->fetchAll();
-} catch (Exception $e) {
-    //
-}
+            ORDER BY p.fecha DESC")->fetchAll();
 
-// Fallback de demostración
-if (empty($pedidosList)) {
-    $pedidosList = [
-        [
-            'id' => 102, 'nombre' => 'Diana', 'apellido' => 'Mendoza', 'correo' => 'diana.men@yahoo.com', 'telefono' => '3192-3329',
-            'subtotal' => 280.00, 'descuento' => 0.00, 'envio' => 150.00, 'total' => 430.00, 'estado' => 'pendiente', 'fecha' => '2026-06-04 18:25:00',
-            'pago_ref' => '#940294', 'pago_estado' => 'pendiente', 'met_nombre' => 'Transferencia'
-        ],
-        [
-            'id' => 101, 'nombre' => 'Josué', 'apellido' => 'Rodríguez', 'correo' => 'josue.hn@gmail.com', 'telefono' => '9900-1122',
-            'subtotal' => 120.00, 'descuento' => 0.00, 'envio' => 150.00, 'total' => 270.00, 'estado' => 'entregado', 'fecha' => '2026-06-03 11:10:00',
-            'pago_ref' => 'Ref-48209', 'pago_estado' => 'aprobado', 'met_nombre' => 'Transferencia'
-        ]
-    ];
+    // Historial de estados (timeline) de todos los pedidos listados, para
+    // que el admin vea en el modal quién cambió qué y cuándo — mismo dato
+    // que la app y el sitio muestran al cliente, más el nombre del admin
+    // responsable de cada paso manual.
+    if (!empty($pedidosList)) {
+        $pedidoIds = array_column($pedidosList, 'id');
+        $placeholders = implode(',', array_fill(0, count($pedidoIds), '?'));
+        $histStmt = $db->prepare(
+            "SELECT h.pedido_id, h.estado, h.nota, h.fecha,
+                    CONCAT(u.nombre, ' ', u.apellido) AS admin_nombre
+             FROM pedido_historial h
+             LEFT JOIN usuarios u ON u.id = h.usuario_id
+             WHERE h.pedido_id IN ($placeholders)
+             ORDER BY h.fecha ASC, h.id ASC"
+        );
+        $histStmt->execute($pedidoIds);
+        foreach ($histStmt->fetchAll() as $paso) {
+            $historialPorPedido[$paso['pedido_id']][] = $paso;
+        }
+    }
+} catch (Exception $e) {}
+
+/**
+ * Mismo mapeo de estado -> color/label/ícono que usa el sitio web para el
+ * cliente (mis_pedidos.php), reutilizado acá para que el timeline del
+ * admin luzca consistente con lo que ve el usuario.
+ */
+function estadoPedidoInfoAdmin(string $estado): array {
+    switch ($estado) {
+        case 'pendiente':      return ['color' => '#fbbf24', 'label' => 'Pendiente',            'icon' => 'fa-clock'];
+        case 'pagado':         return ['color' => '#38bdf8', 'label' => 'Pagado',                'icon' => 'fa-check-circle'];
+        case 'pago_rechazado': return ['color' => '#f87171', 'label' => 'Comprobante rechazado', 'icon' => 'fa-circle-xmark'];
+        case 'procesando':     return ['color' => '#818cf8', 'label' => 'Procesando',             'icon' => 'fa-box'];
+        case 'enviado':        return ['color' => '#38bdf8', 'label' => 'Enviado',                'icon' => 'fa-truck'];
+        case 'entregado':      return ['color' => '#10b981', 'label' => 'Entregado',              'icon' => 'fa-house-circle-check'];
+        case 'cancelado':      return ['color' => '#f87171', 'label' => 'Cancelado',              'icon' => 'fa-ban'];
+        default:                return ['color' => '#94a3b8', 'label' => ucfirst($estado),        'icon' => 'fa-circle'];
+    }
 }
 ?>
-
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pedidos | Admin EcoTienda</title>
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
-    <style>
-        :root {
-            --admin-primary: #10b981;
-            --admin-secondary: #0f172a;
-            --admin-dark-card: #1e293b;
-            --admin-border-color: rgba(255, 255, 255, 0.08);
-            --font-sans: 'Plus Jakarta Sans', sans-serif;
-            --font-display: 'Space Grotesk', sans-serif;
-        }
-
-        body {
-            font-family: var(--font-sans);
-            background-color: #0b0f19;
-            color: #f1f5f9;
-            min-height: 100vh;
-        }
-
-        .sidebar {
-            width: 260px;
-            background-color: var(--admin-secondary);
-            border-right: 1px solid var(--admin-border-color);
-            min-height: 100vh;
-            position: fixed;
-            top: 0;
-            left: 0;
-            z-index: 1020;
-        }
-
-        .sidebar-brand {
-            font-family: var(--font-display);
-            font-weight: 700;
-            font-size: 1.25rem;
-            color: var(--admin-primary) !important;
-            padding: 1.5rem;
-            display: flex;
-            align-items: center;
-            border-bottom: 1px solid var(--admin-border-color);
-        }
-
-        .sidebar-menu {
-            list-style: none;
-            padding: 1rem 0;
-            margin: 0;
-        }
-
-        .sidebar-item a {
-            padding: 0.85rem 1.5rem;
-            display: flex;
-            align-items: center;
-            color: #cbd5e1;
-            text-decoration: none;
-            font-weight: 500;
-            font-size: 0.92rem;
-            border-left: 3px solid transparent;
-            transition: all 0.2s ease;
-        }
-
-        .sidebar-item a:hover, .sidebar-item.active a {
-            color: #fff;
-            background-color: rgba(16, 185, 129, 0.08);
-            border-left-color: var(--admin-primary);
-        }
-
-        .sidebar-item i {
-            width: 25px;
-            font-size: 1.1rem;
-        }
-
-        .main-content {
-            margin-left: 260px;
-            padding: 2rem;
-            min-height: 100vh;
-        }
-
-        .admin-card {
-            background-color: var(--admin-dark-card);
-            border: 1px solid var(--admin-border-color);
-            border-radius: 16px;
-            padding: 1.5rem;
-        }
-        
-        .table {
-            color: #fff;
-            border-color: rgba(255,255,255,0.05);
-        }
-    </style>
-</head>
-<body>
-
-<!-- SIDEBAR -->
-<div class="sidebar">
-    <a href="<?php echo BASE_URL; ?>admin/index.php" class="sidebar-brand text-decoration-none">
-        <i class="fas fa-leaf text-success me-2"></i>
-        <span>EcoTienda <span class="text-success">Admin</span></span>
-    </a>
-    <ul class="sidebar-menu">
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/index.php"><i class="fas fa-gauge-high"></i> Dashboard</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/productos.php"><i class="fas fa-box"></i> Productos</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/categorias.php"><i class="fas fa-tags"></i> Categorías</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/usuarios.php"><i class="fas fa-users"></i> Usuarios</a>
-        </li>
-        <li class="sidebar-item active">
-            <a href="<?php echo BASE_URL; ?>admin/pedidos.php"><i class="fas fa-shopping-bag"></i> Pedidos</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/reportes.php"><i class="fas fa-chart-line"></i> Reportes</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/inventario.php"><i class="fas fa-warehouse"></i> Inventario</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>admin/configuracion.php"><i class="fas fa-cog"></i> Configuración</a>
-        </li>
-        <li class="sidebar-item mt-4">
-            <a href="<?php echo BASE_URL; ?>index.php" class="text-success"><i class="fas fa-store"></i> Volver a Comercio</a>
-        </li>
-        <li class="sidebar-item">
-            <a href="<?php echo BASE_URL; ?>logout.php" class="text-danger"><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</a>
-        </li>
-    </ul>
-</div>
-
-<!-- CONTENIDO PRINCIPAL -->
-<div class="main-content">
+<?php require_once __DIR__ . '/includes/admin_navbar.php'; ?>
     
-    <header class="mb-5 pb-3 border-bottom border-secondary border-opacity-10">
-        <h1 class="h3 fw-bold m-0" style="font-family: var(--font-display);">Gestión de Pedidos de Clientes</h1>
-        <p class="text-secondary small mb-0">🌱 Concilia transferencias, aprueba comprobantes de abono y actualiza estados de transporte.</p>
-    </header>
 
-    <?php if(!empty($error)): ?>
-        <?php echo renderAlert($error, 'danger'); ?>
-    <?php endif; ?>
-
-    <?php if(!empty($success)): ?>
-        <?php echo renderAlert($success, 'success'); ?>
-    <?php endif; ?>
+    <?php if(!empty($error)): echo renderAlert($error, 'danger'); endif; ?>
+    <?php if(!empty($success)): echo renderAlert($success, 'success'); endif; ?>
 
     <div class="admin-card">
         <div class="table-responsive">
-            <table class="table align-middle">
-                <thead class="text-secondary small font-mono">
+            <table class="tabla-pedidos">
+                <thead>
                     <tr>
-                        <th scope="col" class="border-0">Pedido</th>
-                        <th scope="col" class="border-0">EcoCliente</th>
-                        <th scope="col" class="border-0">Fecha / Canal</th>
-                        <th scope="col" class="border-0 text-end">Total</th>
-                        <th scope="col" class="border-0 text-center">Referencia Pago</th>
-                        <th scope="col" class="border-0 text-center">Conciliación</th>
-                        <th scope="col" class="border-0 text-center">Ruta Orden</th>
-                        <th scope="col" class="border-0 text-center">Acciones</th>
+                        <th>Pedido</th>
+                        <th>EcoCliente</th>
+                        <th>Fecha / Canal</th>
+                        <th style="text-align:right">Total</th>
+                        <th style="text-align:center">Ref. Pago</th>
+                        <th style="text-align:center">Conciliación</th>
+                        <th style="text-align:center">Estado</th>
+                        <th style="text-align:center">Acciones</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach($pedidosList as $ord): ?>
-                        <tr>
-                            <!-- ID -->
-                            <td class="font-mono fw-bold text-success py-3">#<?php echo $ord['id']; ?></td>
-                            
-                            <!-- Cliente -->
-                            <td>
-                                <strong class="text-white d-block"><?php echo sanitize($ord['nombre'] . ' ' . $ord['apellido']); ?></strong>
-                                <span class="text-muted text-xs d-block"><?php echo sanitize($ord['telefono'] ?? ''); ?></span>
-                            </td>
+                <?php foreach($pedidosList as $ord):
+                    // Colores conciliación
+                    $pago_estado = $ord['pago_estado'] ?? 'pendiente';
+                    if($pago_estado === 'aprobado') { $pBg = 'rgba(16,185,129,.2)'; $pColor = '#10b981'; $pTxt = 'Aprobado'; }
+                    elseif($pago_estado === 'rechazado') { $pBg = 'rgba(239,68,68,.2)'; $pColor = '#f87171'; $pTxt = 'Rechazado'; }
+                    else { $pBg = 'rgba(251,191,36,.2)'; $pColor = '#fbbf24'; $pTxt = 'Pendiente'; }
 
-                            <!-- Fecha y método -->
-                            <td>
-                                <span class="small text-secondary d-block"><?php echo date('d M, Y h:i A', strtotime($ord['fecha'])); ?></span>
-                                <span class="text-muted text-xxs font-mono text-success uppercase"><?php echo sanitize($ord['met_nombre'] ?? 'Transferencia'); ?></span>
-                            </td>
-
-                            <!-- Total -->
-                            <td class="text-end font-mono text-success fw-bold">
-                                <?php echo formatCurrency($ord['total']); ?>
-                            </td>
-
-                            <!-- Ref de Pago -->
-                            <td class="text-center font-mono text-secondary small">
-                                <?php echo sanitize($ord['pago_ref'] ?? 'No registrada'); ?>
-                            </td>
-
-                            <!-- Estado del pago -->
-                            <td class="text-center">
-                                <?php 
-                                $pBg = 'warning'; $pTxt = 'Pendiente';
-                                if($ord['pago_estado'] === 'aprobado') { $pBg = 'success'; $pTxt = 'Aprobado'; }
-                                elseif($ord['pago_estado'] === 'rechazado') { $pBg = 'danger'; $pTxt = 'Rechazado'; }
-                                ?>
-                                <span class="badge bg-opacity-15 bg-<?php echo $pBg; ?> text-<?php echo $pBg; ?> px-2.5 py-1.5 small font-mono">
-                                    <?php echo $pTxt; ?>
-                                </span>
-                            </td>
-
-                            <!-- Estado del Pedido -->
-                            <td class="text-center">
-                                <?php 
-                                $bColor = 'secondary';
-                                $label = 'Pendiente';
-                                switch ($ord['estado']) {
-                                    case 'pendiente': $bColor = 'warning'; $label = 'Pendiente'; break;
-                                    case 'pagado': $bColor = 'info'; $label = 'Pagado'; break;
-                                    case 'procesando': $bColor = 'primary'; $label = 'Procesando'; break;
-                                    case 'enviado': $bColor = 'info'; $label = 'Enviado'; break;
-                                    case 'entregado': $bColor = 'success'; $label = 'Entregado'; break;
-                                    case 'cancelado': $bColor = 'danger'; $label = 'Cancelado'; break;
-                                }
-                                ?>
-                                <span class="badge bg-<?php echo $bColor; ?> rounded-pill text-xs px-2.5 py-1.5 fw-semibold">
-                                    <?php echo $label; ?>
-                                </span>
-                            </td>
-
-                            <!-- Acciones -->
-                            <td class="text-center">
-                                <div class="d-flex align-items-center justify-content-center gap-1">
-                                    <!-- Modal Trigger de Controles -->
-                                    <button class="btn btn-xs btn-outline-success font-semibold px-2 py-1 text-xs" data-bs-toggle="modal" data-bs-target="#controlModal<?php echo $ord['id']; ?>">
-                                        Gestionar
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-
-                        <!-- MODAL DE GESTIÓN DE PEDIDO INDIVIDUAL -->
-                        <div class="modal fade text-dark" id="controlModal<?php echo $ord['id']; ?>" tabindex="-1" aria-labelledby="conLabel" aria-hidden="true">
-                            <div class="modal-dialog">
-                                <div class="modal-content">
-                                    <div class="modal-header">
-                                        <h5 class="modal-title fw-bold">Gestionar Pedido #<?php echo $ord['id']; ?></h5>
-                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                                    </div>
-                                    <div class="modal-body text-start">
-                                        <p class="small text-secondary mb-3">Cliente: <strong class="text-dark"><?php echo sanitize($ord['nombre'] . ' ' . $ord['apellido']); ?> (<?php echo sanitize($ord['correo']); ?>)</strong></p>
-                                        
-                                        <!-- Formulario 1: Conciliación Económica (Aprobar Pago) -->
-                                        <form action="<?php echo BASE_URL; ?>admin/pedidos.php" method="POST" class="border-bottom pb-3 mb-3">
-                                            <input type="hidden" name="action" value="approve_payment">
-                                            <input type="hidden" name="pedido_id" value="<?php echo $ord['id']; ?>">
-                                            
-                                            <label class="form-label small fw-bold">1. Conciliación de Pago (Referencia: <?php echo sanitize($ord['pago_ref']); ?>)</label>
-                                            <div class="input-group input-group-sm">
-                                                <select name="pago_estado" class="form-select form-select-sm" required>
-                                                    <option value="pendiente" <?php echo $ord['pago_estado'] === 'pendiente' ? 'selected':''; ?>>Pendiente / No verificado</option>
-                                                    <option value="aprobado" <?php echo $ord['pago_estado'] === 'aprobado' ? 'selected':''; ?>>Aprobado / Transferencia recibida</option>
-                                                    <option value="rechazado" <?php echo $ord['pago_estado'] === 'rechazado' ? 'selected':''; ?>>Rechazado / Sin abono</option>
-                                                </select>
-                                                <button type="submit" class="btn btn-success fw-bold text-xs">Guardar Conciliación</button>
-                                            </div>
-                                        </form>
-
-                                        <!-- Formulario 2: Estado de Transporte / Logística -->
-                                        <form action="<?php echo BASE_URL; ?>admin/pedidos.php" method="POST">
-                                            <input type="hidden" name="action" value="update_order_state">
-                                            <input type="hidden" name="pedido_id" value="<?php echo $ord['id']; ?>">
-                                            
-                                            <label class="form-label small fw-bold">2. Logística y Despacho en Honduras</label>
-                                            <div class="input-group input-group-sm mb-3">
-                                                <select name="estado" class="form-select form-select-sm" required>
-                                                    <option value="pendiente" <?php echo $ord['estado'] === 'pendiente' ? 'selected':''; ?>>Pendiente</option>
-                                                    <option value="pagado" <?php echo $ord['estado'] === 'pagado' ? 'selected':''; ?>>Pagado / Confirmado</option>
-                                                    <option value="procesando" <?php echo $ord['estado'] === 'procesando' ? 'selected':''; ?>>Empacando (Procesando)</option>
-                                                    <option value="enviado" <?php echo $ord['estado'] === 'enviado' ? 'selected':''; ?>>Enviado / En ruta</option>
-                                                    <option value="entregado" <?php echo $ord['estado'] === 'entregado' ? 'selected':''; ?>>Entregado (Finalizado)</option>
-                                                    <option value="cancelado" <?php echo $ord['estado'] === 'cancelado' ? 'selected':''; ?>>Cancelado / Devuelto</option>
-                                                </select>
-                                                <button type="submit" class="btn btn-primary fw-bold text-xs">Actualizar Estado</button>
-                                            </div>
-                                        </form>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    <?php endforeach; ?>
+                    // Colores estado pedido
+                    switch($ord['estado']) {
+                        case 'pagado':     $eBg='rgba(56,189,248,.2)';  $eColor='#38bdf8';  $eTxt='Pagado';      break;
+                        case 'procesando': $eBg='rgba(99,102,241,.2)';  $eColor='#818cf8';  $eTxt='Procesando';  break;
+                        case 'enviado':    $eBg='rgba(56,189,248,.2)';  $eColor='#38bdf8';  $eTxt='Enviado';     break;
+                        case 'entregado':  $eBg='rgba(16,185,129,.2)';  $eColor='#10b981';  $eTxt='Entregado';   break;
+                        case 'cancelado':  $eBg='rgba(239,68,68,.2)';   $eColor='#f87171';  $eTxt='Cancelado';   break;
+                        default:           $eBg='rgba(251,191,36,.2)';  $eColor='#fbbf24';  $eTxt='Pendiente';
+                    }
+                ?>
+                    <tr>
+                        <td style="color:#10b981;font-family:monospace;font-weight:700;">#<?php echo $ord['id']; ?></td>
+                        <td>
+                            <strong style="color:#ffffff;font-weight:600;">
+                                <?php echo $ord['nombre']
+                                    ? sanitize($ord['nombre'] . ' ' . $ord['apellido'])
+                                    : 'Invitado (app)'; ?>
+                            </strong>
+                            <span style="display:block;color:#94a3b8;font-size:.8rem;"><?php echo sanitize($ord['telefono'] ?? $ord['correo'] ?? ''); ?></span>
+                        </td>
+                        <td>
+                            <span style="color:#94a3b8;font-size:.83rem;display:block;"><?php echo date('d M, Y h:i A', strtotime($ord['fecha'])); ?></span>
+                            <span style="color:#10b981;font-size:.78rem;font-family:monospace;"><?php echo sanitize($ord['met_nombre'] ?? 'Transferencia'); ?></span>
+                        </td>
+                        <td style="text-align:right;color:#10b981;font-family:monospace;font-weight:700;"><?php echo formatCurrency($ord['total']); ?></td>
+                        <td style="text-align:center;color:#94a3b8;font-family:monospace;font-size:.83rem;"><?php echo sanitize($ord['pago_ref'] ?? 'No registrada'); ?></td>
+                        <td style="text-align:center;">
+                            <span style="background:<?php echo $pBg; ?>;color:<?php echo $pColor; ?>;padding:.3em .75em;border-radius:999px;font-size:.75rem;font-weight:700;">
+                                <?php echo $pTxt; ?>
+                            </span>
+                        </td>
+                        <td style="text-align:center;">
+                            <span style="background:<?php echo $eBg; ?>;color:<?php echo $eColor; ?>;padding:.3em .75em;border-radius:999px;font-size:.75rem;font-weight:700;">
+                                <?php echo $eTxt; ?>
+                            </span>
+                        </td>
+                        <td style="text-align:center;">
+                            <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#controlModal<?php echo $ord['id']; ?>">
+                                Gestionar
+                            </button>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
                 </tbody>
             </table>
+
+            <?php if(empty($pedidosList)): ?>
+                <div class="text-center py-5 text-secondary">
+                    <i class="fas fa-shopping-bag fa-3x mb-3 opacity-25"></i>
+                    <p>No hay pedidos registrados aún.</p>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
 
-</div>
+    <!-- MODALES DE GESTIÓN (fuera de la tabla a propósito: un <form> dentro de un
+         <tbody> es HTML inválido y el navegador lo cierra vacío al parsearlo, dejando
+         los botones "Guardar"/"Actualizar" sin ningún formulario que enviar) -->
+    <?php foreach($pedidosList as $ord):
+        $pago_estado = $ord['pago_estado'] ?? 'pendiente';
+    ?>
+    <div class="modal fade" id="controlModal<?php echo $ord['id']; ?>" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Gestionar Pedido #<?php echo $ord['id']; ?></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-start">
+                    <p class="small text-secondary mb-3">Cliente: <strong style="color:#f1f5f9;"><?php
+                        echo $ord['nombre'] ? sanitize($ord['nombre'] . ' ' . $ord['apellido']) : 'Invitado (app)';
+                    ?> (<?php echo sanitize($ord['correo'] ?? 'sin correo'); ?>)</strong></p>
 
-<!-- Bootstrap Bundle JS -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+                    <?php if (!empty($ord['comprobante_imagen'])): ?>
+                    <div class="mb-3 text-center">
+                        <label class="form-label small fw-bold d-block">Comprobante de transferencia</label>
+                        <a href="<?php echo BASE_URL . ltrim($ord['comprobante_imagen'], '/'); ?>" target="_blank">
+                            <img src="<?php echo BASE_URL . ltrim($ord['comprobante_imagen'], '/'); ?>"
+                                 alt="Comprobante pedido #<?php echo $ord['id']; ?>"
+                                 style="max-width:100%;max-height:220px;border-radius:8px;border:1px solid #dee2e6;">
+                        </a>
+                        <span class="d-block small text-secondary mt-1">Clic para ver en tamaño completo</span>
+                    </div>
+                    <?php endif; ?>
+
+                    <form action="<?php echo BASE_URL; ?>admin/pedidos.php" method="POST" class="border-bottom pb-3 mb-3">
+                        <?php echo csrfField(); ?>
+                        <input type="hidden" name="action" value="approve_payment">
+                        <input type="hidden" name="pedido_id" value="<?php echo (int)$ord['id']; ?>">
+                        <label class="form-label small fw-bold">1. Conciliación de Pago (Ref: <?php echo sanitize($ord['pago_ref'] ?? 'N/A'); ?>)</label>
+                        <div class="input-group input-group-sm">
+                            <select name="pago_estado" class="form-select form-select-sm">
+                                <option value="pendiente" <?php echo $pago_estado==='pendiente' ? 'selected':''; ?>>Pendiente / No verificado</option>
+                                <option value="aprobado"  <?php echo $pago_estado==='aprobado'  ? 'selected':''; ?>>Aprobado / Transferencia recibida</option>
+                                <option value="rechazado" <?php echo $pago_estado==='rechazado' ? 'selected':''; ?>>Rechazado / Sin abono</option>
+                            </select>
+                            <button type="submit" class="btn btn-success fw-bold" style="font-size:.8rem;">Guardar</button>
+                        </div>
+                    </form>
+
+                    <form action="<?php echo BASE_URL; ?>admin/pedidos.php" method="POST">
+                        <?php echo csrfField(); ?>
+                        <input type="hidden" name="action" value="update_order_state">
+                        <input type="hidden" name="pedido_id" value="<?php echo (int)$ord['id']; ?>">
+                        <label class="form-label small fw-bold">2. Estado de Logística</label>
+                        <div class="input-group input-group-sm">
+                            <select name="estado" class="form-select form-select-sm">
+                                <option value="pendiente"  <?php echo $ord['estado']==='pendiente'  ? 'selected':''; ?>>Pendiente</option>
+                                <option value="pagado"     <?php echo $ord['estado']==='pagado'     ? 'selected':''; ?>>Pagado / Confirmado</option>
+                                <option value="procesando" <?php echo $ord['estado']==='procesando' ? 'selected':''; ?>>Procesando</option>
+                                <option value="enviado"    <?php echo $ord['estado']==='enviado'    ? 'selected':''; ?>>Enviado</option>
+                                <option value="entregado"  <?php echo $ord['estado']==='entregado'  ? 'selected':''; ?>>Entregado</option>
+                                <option value="cancelado"  <?php echo $ord['estado']==='cancelado'  ? 'selected':''; ?>>Cancelado</option>
+                            </select>
+                            <button type="submit" class="btn btn-primary fw-bold" style="font-size:.8rem;">Actualizar</button>
+                        </div>
+                    </form>
+
+                    <!-- 3. Historial / timeline del pedido — mismo dato que ve el cliente en el
+                         sitio y en la app, con el nombre del admin que hizo cada cambio manual -->
+                    <?php $historial = $historialPorPedido[$ord['id']] ?? []; ?>
+                    <div class="mt-4 pt-3 border-top">
+                        <label class="form-label small fw-bold d-block mb-3">3. Línea de tiempo del pedido</label>
+                        <?php if (empty($historial)): ?>
+                            <p class="small text-secondary mb-0">Aún no hay pasos registrados.</p>
+                        <?php else: ?>
+                            <ul class="eco-admin-timeline list-unstyled mb-0">
+                                <?php foreach ($historial as $paso):
+                                    $pasoInfo = estadoPedidoInfoAdmin($paso['estado']);
+                                ?>
+                                    <li class="eco-admin-timeline-item">
+                                        <span class="eco-admin-timeline-dot" style="background:<?php echo $pasoInfo['color']; ?>;">
+                                            <i class="fas <?php echo $pasoInfo['icon']; ?>"></i>
+                                        </span>
+                                        <div class="eco-admin-timeline-content">
+                                            <strong style="color:#f1f5f9;display:block;"><?php echo $pasoInfo['label']; ?></strong>
+                                            <?php if (!empty($paso['nota'])): ?>
+                                                <span class="d-block small" style="color:#94a3b8;"><?php echo sanitize($paso['nota']); ?></span>
+                                            <?php endif; ?>
+                                            <span class="d-block small" style="color:#64748b;">
+                                                <?php echo date('d M, Y h:i A', strtotime($paso['fecha'])); ?>
+                                                <?php if (!empty($paso['admin_nombre']) && trim($paso['admin_nombre']) !== ''): ?>
+                                                    &middot; por <?php echo sanitize($paso['admin_nombre']); ?>
+                                                <?php endif; ?>
+                                            </span>
+                                        </div>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endforeach; ?>
+
+    <style>
+        /* Timeline del admin dentro del modal "Gestionar Pedido" */
+        .eco-admin-timeline { position: relative; max-height: 260px; overflow-y: auto; padding-right: 4px; }
+        .eco-admin-timeline-item { position: relative; display: flex; gap: 12px; padding-bottom: 18px; }
+        .eco-admin-timeline-item:last-child { padding-bottom: 0; }
+        .eco-admin-timeline-item::before {
+            content: '';
+            position: absolute;
+            left: 11px;
+            top: 24px;
+            bottom: -4px;
+            width: 2px;
+            background: rgba(148,163,184,.25);
+        }
+        .eco-admin-timeline-item:last-child::before { display: none; }
+        .eco-admin-timeline-dot {
+            flex-shrink: 0;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #0f172a;
+            font-size: .68rem;
+            z-index: 1;
+        }
+        .eco-admin-timeline-content { padding-top: 2px; }
+    </style>
+
+
+
+<?php require_once __DIR__ . '/includes/admin_footer.php'; ?>

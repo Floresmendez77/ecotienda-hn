@@ -34,6 +34,15 @@ if (!isLoggedIn()) {
 
 $user_id = (int) $_SESSION['user_id'];
 
+// Protección CSRF: cualquier método que modifique datos debe traer el
+// token de sesión en el header X-CSRF-Token (GET de solo lectura queda libre).
+if (in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT', 'DELETE'], true)) {
+    $csrfHeader = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+    if (!verifyCsrfToken($csrfHeader)) {
+        jsonResponse(false, null, 'Token de seguridad inválido o expirado. Recargá la página.', 0, 403);
+    }
+}
+
 // Obtener conteo actual del carrito
 function getCartCount(PDO $db, int $user_id): int {
     $stmt = $db->prepare("SELECT COALESCE(SUM(cantidad), 0) AS total FROM carrito WHERE usuario_id = ?");

@@ -70,6 +70,10 @@ if (empty($token) || strlen($token) !== 64 || !ctype_xdigit($token)) {
 
 // ── Procesar formulario de nueva contraseña ───────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $tokenOk && $tokenData) {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        $error   = 'Token de seguridad inválido o expirado. Recargá la página e intentá de nuevo.';
+        $tokenOk = true;
+    } else {
     $password        = $_POST['password']        ?? '';
     $password_confirm = $_POST['password_confirm'] ?? '';
 
@@ -110,6 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $tokenOk && $tokenData) {
             $tokenOk = true;
         }
     }
+    }
 }
 
 require_once __DIR__ . '/includes/navbar.php';
@@ -146,6 +151,7 @@ require_once __DIR__ . '/includes/navbar.php';
                 <?php if ($tokenOk): ?>
                 <!-- Formulario de nueva contraseña -->
                 <form method="POST" action="<?php echo BASE_URL; ?>reset_password.php?token=<?php echo urlencode($token); ?>" novalidate id="reset-form">
+                    <?php echo csrfField(); ?>
 
                     <!-- Nueva contraseña -->
                     <div class="mb-3">

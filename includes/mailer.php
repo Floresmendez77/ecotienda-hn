@@ -5,7 +5,15 @@
  * Descripción: Funciones de envío de correos con PHPMailer para EcoTienda HN
  */
 
-function ecotienda_mail(string $to_email, string $to_name, string $subject, string $html, string $plain): bool {
+function ecotienda_mail(
+    string $to_email,
+    string $to_name,
+    string $subject,
+    string $html,
+    string $plain,
+    ?string $adjunto_contenido = null,
+    ?string $adjunto_nombre = null
+): bool {
     if (!MAIL_ENABLED) return true;
 
     $vendor = __DIR__ . '/../vendor/autoload.php';
@@ -31,6 +39,11 @@ function ecotienda_mail(string $to_email, string $to_name, string $subject, stri
         $mail->Subject = $subject;
         $mail->Body    = $html;
         $mail->AltBody = $plain;
+
+        if ($adjunto_contenido !== null && $adjunto_nombre !== null) {
+            $mail->addStringAttachment($adjunto_contenido, $adjunto_nombre, 'base64', 'application/pdf');
+        }
+
         $mail->send();
         return true;
     } catch (\Exception $e) {
@@ -96,7 +109,7 @@ function notify_bienvenida_eco(PDO $pdo, int $uid): void {
     if (!$u || empty($u['correo'])) return;
 
     $nombre  = htmlspecialchars($u['nombre']);
-    $siteUrl = 'http://localhost:8080/ecotienda-hn';
+    $siteUrl = rtrim(site_url(), '/');
 
     $body = <<<HTML
     <h2 style="color:#1a5c2a;font-size:1.4rem;margin:0 0 8px;">🎉 ¡Bienvenido a EcoTienda HN, {$nombre}!</h2>
@@ -127,7 +140,6 @@ HTML;
 
 // ── 2. CONFIRMACIÓN DE PEDIDO ─────────────────────────────────────────────────
 function notify_pedido_confirmado(PDO $pdo, int $pedido_id): void {
-    // Obtener datos del pedido y del usuario
     $stmt = $pdo->prepare("
         SELECT p.*, u.nombre, u.apellido, u.correo
         FROM pedidos p
@@ -138,7 +150,6 @@ function notify_pedido_confirmado(PDO $pdo, int $pedido_id): void {
     $p = $stmt->fetch();
     if (!$p || empty($p['correo'])) return;
 
-    // Obtener detalle de productos del pedido
     $dstmt = $pdo->prepare("
         SELECT dp.cantidad, dp.precio, dp.subtotal, pr.nombre AS producto_nombre,
                pr.imagen_principal, pr.precio_oferta
@@ -150,7 +161,6 @@ function notify_pedido_confirmado(PDO $pdo, int $pedido_id): void {
     $dstmt->execute([$pedido_id]);
     $items = $dstmt->fetchAll();
 
-    // Datos formateados
     $nombre        = htmlspecialchars($p['nombre']);
     $apellido      = htmlspecialchars($p['apellido']);
     $total_fmt     = number_format((float)($p['total']    ?? 0), 2);
@@ -159,27 +169,21 @@ function notify_pedido_confirmado(PDO $pdo, int $pedido_id): void {
     $fecha         = date('d/m/Y H:i', strtotime($p['fecha']));
     $metodo_pago   = strtolower(trim($p['metodo_pago'] ?? ''));
 
-    // URL dinámica: usa BASE_URL si está disponible, sino fallback a localhost
-    $baseHref = defined('BASE_URL')
-        ? rtrim('http' . ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 's' : '') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'), '/') . BASE_URL
-        : 'http://localhost:8080/ecotienda-hn/';
+    $baseHref = site_url();
 
     $pedidosUrl = rtrim($baseHref, '/') . '/mis_pedidos.php';
 
-    // ── Filas de la tabla de productos ───────────────────────────────────
     $filas = '';
     foreach ($items as $item) {
         $prod_nombre = htmlspecialchars($item['producto_nombre']);
         $precio_fmt  = number_format((float)$item['precio'],    2);
         $sub_fmt     = number_format((float)$item['subtotal'],  2);
 
-        // Imagen del producto
         $img_path   = $item['imagen_principal'] ?? '';
         $img_url    = !empty($img_path)
             ? rtrim($baseHref, '/') . '/' . ltrim($img_path, '/')
             : 'https://placehold.co/60x60/10b981/white?text=Eco';
 
-        // Badge de oferta
         $oferta_badge = !empty($item['precio_oferta'])
             ? "<span style='display:inline-block;background:#e53935;color:#fff;font-size:.68rem;font-weight:700;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle;'>🏷️ Oferta</span>"
             : '';
@@ -206,7 +210,6 @@ function notify_pedido_confirmado(PDO $pdo, int $pedido_id): void {
           </tr>";
     }
 
-    // ── Bloque de instrucciones de pago (solo para transferencia) ────────
     $bloque_pago = '';
     $es_transferencia = in_array($metodo_pago, [
         'transferencia', 'transferencia_bancaria', 'deposito', 'deposito_bancario', 'banco'
@@ -223,7 +226,6 @@ function notify_pedido_confirmado(PDO $pdo, int $pedido_id): void {
         <b style="color:#1a5c2a;">L.&nbsp;{$total_fmt}</b> a cualquiera de las siguientes cuentas:
       </p>
 
-      <!-- Banco Atlántida -->
       <table width="100%" cellpadding="0" cellspacing="0"
              style="background:#fff;border:1px solid #ffe082;border-radius:8px;margin-bottom:10px;overflow:hidden;">
         <tr>
@@ -247,7 +249,6 @@ function notify_pedido_confirmado(PDO $pdo, int $pedido_id): void {
         </tr>
       </table>
 
-      <!-- BAC Honduras -->
       <table width="100%" cellpadding="0" cellspacing="0"
              style="background:#fff;border:1px solid #ffe082;border-radius:8px;margin-bottom:14px;overflow:hidden;">
         <tr>
@@ -280,7 +281,6 @@ function notify_pedido_confirmado(PDO $pdo, int $pedido_id): void {
 PAGO;
     }
 
-    // ── Cuerpo del email ──────────────────────────────────────────────────
     $body = <<<HTML
     <h2 style="color:#1a5c2a;font-size:1.3rem;margin:0 0 6px;">✅ ¡Tu pedido #{$pedido_id} fue recibido — EcoTienda HN!</h2>
     <p style="color:#555;font-size:.9rem;margin:0 0 18px;">
@@ -288,7 +288,6 @@ PAGO;
         A continuación encontrarás el resumen de tu compra:
     </p>
 
-    <!-- Cabecera del pedido -->
     <div style="background:#f0faf2;border:1px solid #b2dfb8;border-radius:10px;padding:14px 16px;margin-bottom:20px;display:flex;gap:20px;flex-wrap:wrap;">
       <div>
         <span style="font-size:.75rem;color:#888;display:block;">N° de Pedido</span>
@@ -304,7 +303,6 @@ PAGO;
       </div>
     </div>
 
-    <!-- Tabla de productos del pedido -->
     <table width="100%" cellpadding="0" cellspacing="0"
            style="border-radius:10px;overflow:hidden;margin-bottom:20px;border:1px solid #dcedc8;">
       <thead>
@@ -317,17 +315,14 @@ PAGO;
       </thead>
       <tbody>
         {$filas}
-        <!-- Subtotal -->
         <tr style="background:#f0faf2;">
           <td colspan="3" style="padding:10px 14px;font-size:.84rem;color:#555;text-align:right;">Subtotal de productos:</td>
           <td style="padding:10px 14px;font-size:.84rem;text-align:right;color:#333;font-family:monospace;">L.&nbsp;{$subtotal_fmt}</td>
         </tr>
-        <!-- Envío -->
         <tr style="background:#f7fdf8;">
           <td colspan="3" style="padding:10px 14px;font-size:.84rem;color:#555;text-align:right;">Envío estándar (Correos HN):</td>
           <td style="padding:10px 14px;font-size:.84rem;text-align:right;color:#333;font-family:monospace;">L.&nbsp;{$envio_fmt}</td>
         </tr>
-        <!-- Total -->
         <tr style="background:#e8f5e9;">
           <td colspan="3" style="padding:13px 14px;font-size:.92rem;font-weight:700;color:#1a5c2a;text-align:right;">
             TOTAL A PAGAR:
@@ -341,7 +336,6 @@ PAGO;
 
     {$bloque_pago}
 
-    <!-- Botón Ver Mis Pedidos -->
     <p style="text-align:center;margin:26px 0 16px;">
       <a href="{$pedidosUrl}"
          style="background:linear-gradient(135deg,#1a5c2a,#2d8a45);color:#fff;text-decoration:none;
@@ -381,7 +375,7 @@ function notify_estado_pedido(PDO $pdo, int $pedido_id, string $nuevo_estado): v
 
     $nombre  = htmlspecialchars($p['nombre']);
     $total   = number_format($p['total'], 2);
-    $siteUrl = 'http://localhost:8080/ecotienda-hn';
+    $siteUrl = rtrim(site_url(), '/');
 
     $estados = [
         'pagado'      => ['emoji' => '💳', 'color' => '#1565C0', 'texto' => 'Pago Confirmado',    'desc' => 'Tu pago fue verificado. Estamos preparando tu pedido.'],
@@ -428,7 +422,7 @@ function notify_cambio_password(PDO $pdo, int $uid): void {
 
     $nombre  = htmlspecialchars($u['nombre']);
     $fecha   = date('d/m/Y H:i');
-    $siteUrl = 'http://localhost:8080/ecotienda-hn';
+    $siteUrl = rtrim(site_url(), '/');
 
     $body = <<<HTML
     <h2 style="color:#1a5c2a;font-size:1.3rem;margin:0 0 8px;">🔒 Contraseña Actualizada</h2>
@@ -454,4 +448,36 @@ HTML;
     $html  = ecotienda_email_template('Contraseña Actualizada', $body);
     $plain = "Hola {$nombre}, tu contraseña de EcoTienda HN fue cambiada el {$fecha}. Si no fuiste tú, contáctanos.";
     ecotienda_mail($u['correo'], $nombre, "🔒 Contraseña actualizada – EcoTienda HN", $html, $plain);
+}
+
+// ── 5. RECIBO DE PEDIDO (checkout invitado, con PDF adjunto) ─────────────────
+function notify_recibo_pedido_invitado(PDO $pdo, int $pedido_id, string $pdfContenido): bool {
+    $stmt = $pdo->prepare("SELECT correo_invitado, total FROM pedidos WHERE id = ?");
+    $stmt->execute([$pedido_id]);
+    $p = $stmt->fetch();
+    if (!$p || empty($p['correo_invitado'])) return false;
+
+    $total_fmt = number_format((float)$p['total'], 2);
+
+    $body = <<<HTML
+    <h2 style="color:#1a5c2a;font-size:1.3rem;margin:0 0 8px;">🧾 ¡Gracias por tu compra!</h2>
+    <p style="color:#555;font-size:.9rem;margin:0 0 20px;">
+        Tu pedido <b>#{$pedido_id}</b> fue pagado exitosamente por un total de
+        <b style="color:#1a5c2a;">L. {$total_fmt}</b>. Adjuntamos tu recibo en PDF para tus registros.
+    </p>
+    <p style="color:#888;font-size:.8rem;text-align:center;">¡Gracias por comprar eco-responsable! 🌱🇭🇳</p>
+HTML;
+
+    $html  = ecotienda_email_template("Recibo de tu pedido #{$pedido_id}", $body);
+    $plain = "Gracias por tu compra en EcoTienda HN. Tu pedido #{$pedido_id} fue pagado por L. {$total_fmt}. Adjunto va tu recibo en PDF.";
+
+    return ecotienda_mail(
+        $p['correo_invitado'],
+        'Cliente EcoTienda HN',
+        "🧾 Recibo de tu pedido #{$pedido_id} — EcoTienda HN",
+        $html,
+        $plain,
+        $pdfContenido,
+        "recibo-pedido-{$pedido_id}.pdf"
+    );
 }

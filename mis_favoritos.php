@@ -171,6 +171,7 @@ try {
 <script>
 (function () {
     const BASE = '<?php echo BASE_URL; ?>';
+    const CSRF_TOKEN = '<?php echo addslashes(generateCsrfToken()); ?>';
 
     function showToast(msg, danger) {
         let t = document.getElementById('ecoToastFav');
@@ -198,7 +199,7 @@ try {
 
             fetch(BASE + 'api/favoritos.php', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
                 body: JSON.stringify({ producto_id: prodId })
             })
             .then(r => r.json())

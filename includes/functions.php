@@ -10,6 +10,36 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/database.php';
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  URL ABSOLUTA DEL SITIO (usar SIEMPRE esta función, nunca concatenar a mano)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Devuelve una URL absoluta y correcta del sitio, sin importar si BASE_URL
+ * (definida en config.php) es una ruta relativa ("/") o ya viene absoluta
+ * desde una variable de entorno (como en AlwaysData: "https://mi-api-test.alwaysdata.net/").
+ *
+ * Antes, varios archivos (forgot_password.php, mailer.php) le pegaban manualmente
+ * "https://" + HTTP_HOST por delante de BASE_URL, lo que duplicaba el dominio
+ * cuando BASE_URL ya era absoluta. Esta función centraliza esa lógica.
+ *
+ * @param string $path Ruta relativa al sitio, ej: 'reset_password.php?token=abc'
+ */
+function site_url(string $path = ''): string {
+    $path = ltrim($path, '/');
+    $base = defined('BASE_URL') ? BASE_URL : '/';
+
+    if (preg_match('#^https?://#i', $base)) {
+        // BASE_URL ya es absoluta (ej: variable de entorno en AlwaysData)
+        return rtrim($base, '/') . '/' . $path;
+    }
+
+    // BASE_URL es relativa: construir el absoluto a mano
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    return $scheme . '://' . $host . rtrim($base, '/') . '/' . $path;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  LOGGING DE ERRORES
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -161,6 +191,35 @@ function logAuditoria($usuario_id, string $accion, string $tabla_afectada): bool
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  HISTORIAL DE PEDIDOS (Fase 9 — timeline en la app)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Inserta una fila en pedido_historial. Es el "paso" de timeline que la app
+ * móvil (y a futuro el sitio web) muestra en "Mis pedidos". Se llama cada
+ * vez que el estado de un pedido cambia: creación, pago aprobado/rechazado,
+ * y los cambios de logística que hace el admin (procesando/enviado/etc).
+ */
+function registrarHistorialPedido(PDO $db, int $pedidoId, string $estado, ?string $nota = null, ?int $usuarioId = null): bool {
+    try {
+        $sql = "INSERT INTO pedido_historial (pedido_id, estado, nota, usuario_id)
+                VALUES (:pedido_id, :estado, :nota, :usuario_id)";
+        $stmt = $db->prepare($sql);
+        return $stmt->execute([
+            ':pedido_id'  => $pedidoId,
+            ':estado'     => $estado,
+            ':nota'       => $nota,
+            ':usuario_id' => $usuarioId,
+        ]);
+    } catch (Exception $e) {
+        logError('ERROR', 'Error al registrar historial de pedido: ' . $e->getMessage(), [
+            'pedido_id' => $pedidoId, 'estado' => $estado,
+        ]);
+        return false;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  UI HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -242,6 +301,109 @@ function clearLoginAttempts(): void
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  STOCK DE PEDIDOS (Fase 7 — fix: checkout-crear-orden.php y
+//  checkout-capturar-pago.php de la app no descontaban stock)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Excepción específica para "ya no queda stock suficiente al momento de
+ * confirmar". El caller decide si esto debe abortar la operación (pago
+ * manual, todavía no se cobró nada) o solo quedar registrado como aviso
+ * (captura de PayPal, el dinero ya se cobró y no tiene sentido fallar).
+ */
+class StockInsuficienteException extends Exception {}
+
+/**
+ * Descuenta el stock de todos los productos de un pedido ya creado,
+ * usando su `detalle_pedido`, con el mismo patrón atómico que checkout.php:
+ * UPDATE ... WHERE stock >= cantidad, para que dos confirmaciones
+ * simultáneas nunca dejen el stock en negativo sin necesidad de locks
+ * explícitos.
+ *
+ * IMPORTANTE: debe llamarse DENTRO de una transacción ya abierta
+ * (`$db->beginTransaction()`) por quien la invoca. Esta función no hace
+ * commit ni rollback — eso le corresponde al caller.
+ *
+ * @throws StockInsuficienteException si algún producto ya no tiene stock
+ *         suficiente. La transacción queda intacta; el caller decide si
+ *         hace rollback o no.
+ */
+function descontarStockPedido(PDO $db, int $pedidoId, string $motivoInventario): void
+{
+    $detalleStmt = $db->prepare(
+        "SELECT dp.producto_id, dp.cantidad, p.nombre
+         FROM detalle_pedido dp
+         INNER JOIN productos p ON p.id = dp.producto_id
+         WHERE dp.pedido_id = :pedido_id"
+    );
+    $detalleStmt->execute([':pedido_id' => $pedidoId]);
+    $lineas = $detalleStmt->fetchAll();
+
+    $stockStmt = $db->prepare(
+        "UPDATE productos SET stock = stock - :cantidad WHERE id = :producto_id AND stock >= :cantidad2"
+    );
+    $movStmt = $db->prepare(
+        "INSERT INTO inventario (producto_id, tipo_movimiento, cantidad, descripcion)
+         VALUES (:producto_id, 'salida', :cantidad, :descripcion)"
+    );
+
+    foreach ($lineas as $linea) {
+        $stockStmt->execute([
+            ':cantidad'    => $linea['cantidad'],
+            ':cantidad2'   => $linea['cantidad'],
+            ':producto_id' => $linea['producto_id'],
+        ]);
+
+        if ($stockStmt->rowCount() === 0) {
+            throw new StockInsuficienteException(
+                "Stock insuficiente de '{$linea['nombre']}' para el pedido #{$pedidoId}."
+            );
+        }
+
+        $movStmt->execute([
+            ':producto_id' => $linea['producto_id'],
+            ':cantidad'    => $linea['cantidad'],
+            ':descripcion' => $motivoInventario . " (Pedido #{$pedidoId})",
+        ]);
+    }
+}
+
+/**
+ * Devuelve al inventario el stock de un pedido cuyo pago fue rechazado
+ * (o cancelado) después de haber sido descontado. Mismo criterio de
+ * transacción abierta por el caller que descontarStockPedido().
+ */
+function restaurarStockPedido(PDO $db, int $pedidoId, string $motivoInventario): void
+{
+    $detalleStmt = $db->prepare(
+        "SELECT producto_id, cantidad FROM detalle_pedido WHERE pedido_id = :pedido_id"
+    );
+    $detalleStmt->execute([':pedido_id' => $pedidoId]);
+    $lineas = $detalleStmt->fetchAll();
+
+    $stockStmt = $db->prepare(
+        "UPDATE productos SET stock = stock + :cantidad WHERE id = :producto_id"
+    );
+    $movStmt = $db->prepare(
+        "INSERT INTO inventario (producto_id, tipo_movimiento, cantidad, descripcion)
+         VALUES (:producto_id, 'entrada', :cantidad, :descripcion)"
+    );
+
+    foreach ($lineas as $linea) {
+        $stockStmt->execute([
+            ':cantidad'    => $linea['cantidad'],
+            ':producto_id' => $linea['producto_id'],
+        ]);
+
+        $movStmt->execute([
+            ':producto_id' => $linea['producto_id'],
+            ':cantidad'    => $linea['cantidad'],
+            ':descripcion' => $motivoInventario . " (Pedido #{$pedidoId})",
+        ]);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  SUBIDA DE ARCHIVOS
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -310,6 +472,7 @@ function renderAddToCartScript(): void
     $apiUrl    = BASE_URL . 'api/carrito.php';
     $loginUrl  = BASE_URL . 'login.php';
     $isLogged  = isLoggedIn() ? 'true' : 'false';
+    $csrfToken = generateCsrfToken();
     ?>
 <script>
 (function () {
@@ -317,6 +480,7 @@ function renderAddToCartScript(): void
     const BASE_URL   = '<?php echo $baseUrl; ?>';
     const LOGIN_URL  = '<?php echo $loginUrl; ?>';
     const IS_LOGGED  = <?php echo $isLogged; ?>;
+    const CSRF_TOKEN = '<?php echo addslashes($csrfToken); ?>';
     const PENDING_KEY = 'eco_pending_cart';
 
     function getPendingCart() {
@@ -375,6 +539,61 @@ function renderAddToCartScript(): void
 
         if (!productoId || productoId <= 0) return;
 
+        /* ── GSAP FLY TO CART MICRO-INTERACTION ────────────────────────── */
+        try {
+            if (typeof gsap !== 'undefined' && window.innerWidth >= 768 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                let btn = (window.event && window.event.currentTarget) ? window.event.currentTarget : null;
+                let sourceImg = null;
+                if (btn) {
+                    let card = btn.closest('.card, .carousel-item-card, [data-product-card]');
+                    if (card) {
+                        sourceImg = card.querySelector('img');
+                    }
+                }
+                if (!sourceImg) {
+                    sourceImg = document.querySelector(`a[href*="producto.php?id=${productoId}"]`)?.closest('.card')?.querySelector('img') || document.querySelector('.card img');
+                }
+
+                const cartTarget = document.querySelector('.cart-icon-wrapper') || document.querySelector('a[href*="carrito.php"]');
+                if (sourceImg && cartTarget) {
+                    const sRect = sourceImg.getBoundingClientRect();
+                    const tRect = cartTarget.getBoundingClientRect();
+
+                    const clone = sourceImg.cloneNode(true);
+                    clone.style.cssText = `
+                        position: fixed;
+                        top: ${sRect.top}px;
+                        left: ${sRect.left}px;
+                        width: ${sRect.width}px;
+                        height: ${sRect.height}px;
+                        z-index: 99999;
+                        pointer-events: none;
+                        border-radius: 16px;
+                        box-shadow: 0 12px 30px rgba(16, 185, 129, 0.4);
+                        object-fit: cover;
+                    `;
+                    document.body.appendChild(clone);
+
+                    gsap.to(clone, {
+                        top: tRect.top + tRect.height / 2 - 20,
+                        left: tRect.left + tRect.width / 2 - 20,
+                        width: 40,
+                        height: 40,
+                        opacity: 0.15,
+                        scale: 0.4,
+                        duration: 0.75,
+                        ease: 'power3.inOut',
+                        onComplete: function () {
+                            clone.remove();
+                            gsap.fromTo(cartTarget, { scale: 1 }, { scale: 1.25, duration: 0.25, yoyo: true, repeat: 1, ease: 'back.out(2)' });
+                        }
+                    });
+                }
+            }
+        } catch (e) {
+            // Silencioso
+        }
+
         if (!IS_LOGGED) {
             const pending = getPendingCart();
             const idx = pending.findIndex(i => i.producto_id === productoId);
@@ -393,7 +612,7 @@ function renderAddToCartScript(): void
         try {
             const res = await fetch(API_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
                 body: JSON.stringify({ producto_id: productoId, cantidad: cantidad }),
             });
             const json = await res.json();
@@ -424,7 +643,7 @@ function renderAddToCartScript(): void
             try {
                 const res = await fetch(API_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
                     body: JSON.stringify({
                         producto_id: item.producto_id,
                         cantidad: item.cantidad,

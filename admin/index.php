@@ -14,6 +14,7 @@ require_once __DIR__ . '/../includes/functions.php';
 requireAdmin();
 
 $pageTitle = "Panel de Control";
+$pageSubtitle = "🌱 Resumen y analíticas de la operación — EcoTienda HN";
 
 // ══════════════════════════════════════════════════════════════
 //  MÉTRICAS REALES
@@ -26,7 +27,7 @@ $productosActivos  = 0;
 // Chart data
 $mesesLabels       = [];
 $ventasMensuales   = [];
-$estadosPedidos    = ['pendiente' => 0, 'procesando' => 0, 'enviado' => 0, 'entregado' => 0, 'cancelado' => 0];
+$estadosPedidos    = ['pendiente' => 0, 'pagado' => 0, 'procesando' => 0, 'enviado' => 0, 'entregado' => 0, 'cancelado' => 0];
 
 $lowStockProducts  = [];
 $recentOrders      = [];
@@ -53,7 +54,7 @@ try {
     $usuariosTotal = (int)$stmt->fetchColumn();
 
     // ── KPI 4: Productos activos ──────────────────────────────
-    $stmt = $db->query("SELECT COUNT(*) FROM productos WHERE activo = 1 OR activo IS NULL");
+    $stmt = $db->query("SELECT COUNT(*) FROM productos WHERE estado = 'activo'");
     $productosActivos = (int)$stmt->fetchColumn();
 
     // ── Gráfica de barras: ventas últimos 6 meses ─────────────
@@ -103,10 +104,10 @@ try {
 
     // ── Últimos 5 pedidos con cliente ─────────────────────────
     $stmt = $db->query("
-        SELECT p.id, p.total, p.estado, p.fecha,
+        SELECT p.id, p.total, p.estado, p.fecha, p.correo_invitado,
                u.nombre, u.apellido
         FROM pedidos p
-        INNER JOIN usuarios u ON p.usuario_id = u.id
+        LEFT JOIN usuarios u ON p.usuario_id = u.id
         ORDER BY p.fecha DESC
         LIMIT 5
     ");
@@ -126,7 +127,7 @@ if ($usandoFallback) {
     $usuariosTotal    = 41;
     $productosActivos = 12;
     $ventasMensuales  = [12000, 19500, 31200, 24800, 45000, 28450];
-    $estadosPedidos   = ['pendiente' => 8, 'procesando' => 5, 'enviado' => 11, 'entregado' => 34, 'cancelado' => 3];
+    $estadosPedidos   = ['pendiente' => 8, 'pagado' => 6, 'procesando' => 5, 'enviado' => 11, 'entregado' => 34, 'cancelado' => 3];
     $lowStockProducts = [
         ['id' => 3, 'nombre' => 'Set de Cubiertos de Bambú con Estuche', 'stock' => 2, 'precio' => 85.00],
         ['id' => 4, 'nombre' => 'Termo Acero de Doble Capa Térmica', 'stock' => 0, 'precio' => 350.00],
@@ -144,217 +145,17 @@ if ($usandoFallback) {
 $chartMeses     = json_encode($mesesLabels);
 $chartVentas    = json_encode($ventasMensuales);
 $chartDonaData  = json_encode(array_values($estadosPedidos));
-$chartDonaLabels = json_encode(['Pendiente', 'Procesando', 'Enviado', 'Entregado', 'Cancelado']);
+$chartDonaLabels = json_encode(['Pendiente', 'Pagado', 'Procesando', 'Enviado', 'Entregado', 'Cancelado']);
 ?>
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo $pageTitle; ?> | Admin EcoTienda</title>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
-    <style>
-        :root {
-            --eco-green:    #10b981;
-            --eco-green2:   #059669;
-            --eco-green3:   #34d399;
-            --admin-bg:     #0b0f19;
-            --admin-card:   #1e293b;
-            --admin-border: rgba(255,255,255,.08);
-            --font-sans:    'Plus Jakarta Sans', sans-serif;
-            --font-display: 'Space Grotesk', sans-serif;
-        }
-        *, *::before, *::after { box-sizing: border-box; }
+<?php require_once __DIR__ . '/includes/admin_navbar.php'; ?>
 
-        body {
-            font-family: var(--font-sans);
-            background-color: var(--admin-bg);
-            color: #f1f5f9;
-            min-height: 100vh;
-            overflow-x: hidden;
-        }
-
-        /* ── SIDEBAR ── */
-        .sidebar {
-            width: 260px;
-            background-color: #0f172a;
-            border-right: 1px solid var(--admin-border);
-            min-height: 100vh;
-            position: fixed;
-            top: 0; left: 0;
-            z-index: 1020;
-            transition: margin .3s;
-        }
-        .sidebar-brand {
-            font-family: var(--font-display);
-            font-weight: 700;
-            font-size: 1.2rem;
-            color: var(--eco-green) !important;
-            padding: 1.4rem 1.5rem;
-            display: flex;
-            align-items: center;
-            border-bottom: 1px solid var(--admin-border);
-            text-decoration: none;
-        }
-        .sidebar-menu { list-style: none; padding: 1rem 0; margin: 0; }
-        .sidebar-item a {
-            padding: .8rem 1.5rem;
-            display: flex;
-            align-items: center;
-            color: #94a3b8;
-            text-decoration: none;
-            font-weight: 500;
-            font-size: .9rem;
-            border-left: 3px solid transparent;
-            transition: all .2s;
-            gap: .75rem;
-        }
-        .sidebar-item a:hover, .sidebar-item.active a {
-            color: #fff;
-            background: rgba(16,185,129,.08);
-            border-left-color: var(--eco-green);
-        }
-        .sidebar-item i { width: 20px; text-align: center; }
-
-        /* ── MAIN ── */
-        .main-content {
-            margin-left: 260px;
-            padding: 2rem;
-            min-height: 100vh;
-        }
-        @media (max-width: 991.98px) {
-            .sidebar { margin-left: -260px; }
-            .sidebar.open { margin-left: 0; }
-            .main-content { margin-left: 0; }
-        }
-
-        /* ── CARDS ── */
-        .admin-card {
-            background: var(--admin-card);
-            border: 1px solid var(--admin-border);
-            border-radius: 16px;
-            padding: 1.5rem;
-        }
-
-        /* ── KPI CARDS ── */
-        .kpi-card {
-            background: var(--admin-card);
-            border: 1px solid var(--admin-border);
-            border-radius: 16px;
-            padding: 1.4rem 1.5rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            transition: transform .2s, box-shadow .2s;
-        }
-        .kpi-card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 12px 32px rgba(16,185,129,.12);
-        }
-        .kpi-icon {
-            width: 52px; height: 52px;
-            border-radius: 14px;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 1.3rem;
-            flex-shrink: 0;
-        }
-        .kpi-label { font-size: .78rem; color: #64748b; font-weight: 500; margin-bottom: .3rem; }
-        .kpi-value { font-size: 1.6rem; font-weight: 800; line-height: 1.1; letter-spacing: -.5px; }
-
-        /* ── BADGE ESTADO ── */
-        .badge-estado {
-            padding: .35em .75em;
-            border-radius: 999px;
-            font-size: .73rem;
-            font-weight: 600;
-            letter-spacing: .3px;
-        }
-        .badge-pendiente  { background: rgba(251,191, 36,.15); color: #fbbf24; }
-        .badge-procesando { background: rgba(56, 189,248,.15); color: #38bdf8; }
-        .badge-enviado    { background: rgba(139,92, 246,.15); color: #a78bfa; }
-        .badge-entregado  { background: rgba(16, 185,129,.15); color: #10b981; }
-        .badge-cancelado  { background: rgba(239,68,  68,.15); color: #f87171; }
-
-        /* ── TABLE ── */
-        .eco-table { width: 100%; border-collapse: collapse; }
-        .eco-table th {
-            color: #64748b; font-size: .78rem; font-weight: 600;
-            padding: .6rem 1rem; text-transform: uppercase; letter-spacing: .5px;
-            border-bottom: 1px solid var(--admin-border);
-        }
-        .eco-table td {
-            padding: .9rem 1rem;
-            border-bottom: 1px solid rgba(255,255,255,.04);
-            font-size: .9rem;
-            vertical-align: middle;
-        }
-        .eco-table tr:last-child td { border-bottom: none; }
-        .eco-table tr:hover td { background: rgba(255,255,255,.02); }
-
-        /* ── Fallback badge ── */
-        .fallback-badge {
-            display: inline-block;
-            font-size: .72rem;
-            background: rgba(251,191,36,.15);
-            color: #fbbf24;
-            border-radius: 6px;
-            padding: .15rem .5rem;
-            margin-left: .5rem;
-            vertical-align: middle;
-        }
-    </style>
-</head>
-<body>
-
-<!-- SIDEBAR -->
-<div class="sidebar" id="sidebar">
-    <a href="<?php echo BASE_URL; ?>admin/index.php" class="sidebar-brand">
-        <i class="fas fa-leaf me-2"></i>EcoTienda <span class="text-white ms-1">Admin</span>
-    </a>
-    <ul class="sidebar-menu">
-        <li class="sidebar-item active"><a href="<?php echo BASE_URL; ?>admin/index.php"><i class="fas fa-gauge-high"></i>Dashboard</a></li>
-        <li class="sidebar-item"><a href="<?php echo BASE_URL; ?>admin/productos.php"><i class="fas fa-box"></i>Productos</a></li>
-        <li class="sidebar-item"><a href="<?php echo BASE_URL; ?>admin/categorias.php"><i class="fas fa-tags"></i>Categorías</a></li>
-        <li class="sidebar-item"><a href="<?php echo BASE_URL; ?>admin/usuarios.php"><i class="fas fa-users"></i>Usuarios</a></li>
-        <li class="sidebar-item"><a href="<?php echo BASE_URL; ?>admin/pedidos.php"><i class="fas fa-shopping-bag"></i>Pedidos</a></li>
-        <li class="sidebar-item"><a href="<?php echo BASE_URL; ?>admin/reportes.php"><i class="fas fa-chart-line"></i>Reportes</a></li>
-        <li class="sidebar-item"><a href="<?php echo BASE_URL; ?>admin/inventario.php"><i class="fas fa-warehouse"></i>Inventario</a></li>
-        <li class="sidebar-item"><a href="<?php echo BASE_URL; ?>admin/configuracion.php"><i class="fas fa-cog"></i>Configuración</a></li>
-        <li class="sidebar-item mt-4"><a href="<?php echo BASE_URL; ?>index.php" class="text-success"><i class="fas fa-store"></i>Ver tienda</a></li>
-        <li class="sidebar-item"><a href="<?php echo BASE_URL; ?>logout.php" class="text-danger"><i class="fas fa-sign-out-alt"></i>Cerrar sesión</a></li>
-    </ul>
-</div>
-
-<!-- CONTENIDO PRINCIPAL -->
-<div class="main-content">
-
-    <!-- Header -->
-    <header class="d-flex justify-content-between align-items-center mb-5 pb-3" style="border-bottom:1px solid var(--admin-border)">
-        <div>
-            <h1 class="h3 fw-bold m-0" style="font-family:var(--font-display)">
-                Rendimiento General
-                <?php if ($usandoFallback): ?>
-                    <span class="fallback-badge"><i class="fas fa-database me-1"></i>datos demo</span>
-                <?php endif; ?>
-            </h1>
-            <p class="text-secondary small mb-0 mt-1">🌱 Resumen y analíticas de la operación — EcoTienda HN</p>
+    <?php if ($usandoFallback): ?>
+        <div class="d-flex justify-content-end mb-4">
+            <span class="fallback-badge"><i class="fas fa-database me-1"></i>Mostrando datos de demostración</span>
         </div>
-        <div class="d-flex align-items-center gap-3">
-            <span class="small text-success d-none d-md-inline">
-                <i class="fas fa-calendar-check me-1"></i><?php echo date('d M, Y'); ?>
-            </span>
-            <!-- Hamburger for mobile -->
-            <button class="btn btn-sm btn-outline-secondary d-lg-none" onclick="document.getElementById('sidebar').classList.toggle('open')">
-                <i class="fas fa-bars"></i>
-            </button>
-            <div style="width:38px;height:38px;border-radius:50%;background:var(--eco-green);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem">ADM</div>
-        </div>
-    </header>
+    <?php endif; ?>
 
-    <!-- ══ KPI: 4 TARJETAS ══ -->
+    <!-- ══ KPI: 4 TARJETAS (con animación GSAP CountUp) ══ -->
     <div class="row g-3 mb-4">
 
         <!-- Pedidos hoy -->
@@ -362,7 +163,7 @@ $chartDonaLabels = json_encode(['Pendiente', 'Procesando', 'Enviado', 'Entregado
             <div class="kpi-card">
                 <div>
                     <div class="kpi-label"><i class="fas fa-calendar-day me-1"></i>Pedidos hoy</div>
-                    <div class="kpi-value text-success"><?php echo $pedidosHoy; ?></div>
+                    <div class="kpi-value text-success" id="kpiPedidosHoy" data-count-target="<?php echo (int)$pedidosHoy; ?>">0</div>
                     <div class="mt-1 small text-muted">órdenes recibidas</div>
                 </div>
                 <div class="kpi-icon" style="background:rgba(16,185,129,.12);color:var(--eco-green)">
@@ -376,7 +177,7 @@ $chartDonaLabels = json_encode(['Pendiente', 'Procesando', 'Enviado', 'Entregado
             <div class="kpi-card">
                 <div>
                     <div class="kpi-label"><i class="fas fa-calendar-alt me-1"></i>Ingresos del mes</div>
-                    <div class="kpi-value text-success" style="font-size:1.3rem"><?php echo formatCurrency($ingresosMes); ?></div>
+                    <div class="kpi-value text-success" style="font-size:1.3rem" id="kpiIngresosMes" data-count-target="<?php echo (float)$ingresosMes; ?>" data-count-currency="1"><?php echo formatCurrency(0); ?></div>
                     <div class="mt-1 small text-muted"><?php echo date('F Y'); ?></div>
                 </div>
                 <div class="kpi-icon" style="background:rgba(16,185,129,.12);color:var(--eco-green)">
@@ -390,7 +191,7 @@ $chartDonaLabels = json_encode(['Pendiente', 'Procesando', 'Enviado', 'Entregado
             <div class="kpi-card">
                 <div>
                     <div class="kpi-label"><i class="fas fa-users me-1"></i>Clientes registrados</div>
-                    <div class="kpi-value text-info"><?php echo $usuariosTotal; ?></div>
+                    <div class="kpi-value text-info" id="kpiUsuariosTotal" data-count-target="<?php echo (int)$usuariosTotal; ?>">0</div>
                     <div class="mt-1 small text-muted">compradores activos</div>
                 </div>
                 <div class="kpi-icon" style="background:rgba(56,189,248,.12);color:#38bdf8">
@@ -404,7 +205,7 @@ $chartDonaLabels = json_encode(['Pendiente', 'Procesando', 'Enviado', 'Entregado
             <div class="kpi-card">
                 <div>
                     <div class="kpi-label"><i class="fas fa-leaf me-1"></i>Productos activos</div>
-                    <div class="kpi-value text-warning"><?php echo $productosActivos; ?></div>
+                    <div class="kpi-value text-warning" id="kpiProductosActivos" data-count-target="<?php echo (int)$productosActivos; ?>">0</div>
                     <div class="mt-1 small text-muted">en catálogo</div>
                 </div>
                 <div class="kpi-icon" style="background:rgba(251,191,36,.12);color:#fbbf24">
@@ -445,6 +246,7 @@ $chartDonaLabels = json_encode(['Pendiente', 'Procesando', 'Enviado', 'Entregado
                     <?php
                     $donaColores = [
                         'pendiente'  => ['bg' => 'rgba(251,191,36,.15)',  'text' => '#fbbf24', 'label' => 'Pendiente'],
+                        'pagado'     => ['bg' => 'rgba(45,212,191,.15)',  'text' => '#2dd4bf', 'label' => 'Pagado'],
                         'procesando' => ['bg' => 'rgba(56,189,248,.15)',  'text' => '#38bdf8', 'label' => 'Procesando'],
                         'enviado'    => ['bg' => 'rgba(139,92,246,.15)',  'text' => '#a78bfa', 'label' => 'Enviado'],
                         'entregado'  => ['bg' => 'rgba(16,185,129,.15)', 'text' => '#10b981', 'label' => 'Entregado'],
@@ -488,12 +290,12 @@ $chartDonaLabels = json_encode(['Pendiente', 'Procesando', 'Enviado', 'Entregado
                         <tbody>
                         <?php foreach ($recentOrders as $order):
                             $estadoKey = $order['estado'] ?? 'pendiente';
-                            $labels = ['pendiente'=>'Pendiente','procesando'=>'Procesando','enviado'=>'Enviado','entregado'=>'Entregado','cancelado'=>'Cancelado'];
+                            $labels = ['pendiente'=>'Pendiente','pagado'=>'Pagado','procesando'=>'Procesando','enviado'=>'Enviado','entregado'=>'Entregado','cancelado'=>'Cancelado'];
                             $label = $labels[$estadoKey] ?? ucfirst($estadoKey);
                         ?>
                             <tr>
                                 <td class="text-success fw-bold">#<?php echo $order['id']; ?></td>
-                                <td><?php echo sanitize($order['nombre'] . ' ' . $order['apellido']); ?></td>
+                                <td><?php echo !empty($order['nombre']) ? sanitize($order['nombre'] . ' ' . $order['apellido']) : sanitize($order['correo_invitado'] ?? 'Invitado'); ?></td>
                                 <td class="text-muted small"><?php echo date('d/m/Y H:i', strtotime($order['fecha'])); ?></td>
                                 <td class="text-end fw-600"><?php echo formatCurrency($order['total']); ?></td>
                                 <td class="text-center">
@@ -540,7 +342,29 @@ $chartDonaLabels = json_encode(['Pendiente', 'Procesando', 'Enviado', 'Entregado
         </div>
     </div>
 
-</div><!-- /main-content -->
+<!-- GSAP COUNTUP: animación de las 4 tarjetas KPI -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    if (typeof gsap === 'undefined') return;
+    document.querySelectorAll('[data-count-target]').forEach(function (el) {
+        var target = parseFloat(el.getAttribute('data-count-target')) || 0;
+        var isCurrency = el.hasAttribute('data-count-currency');
+        var obj = { value: 0 };
+        gsap.to(obj, {
+            value: target,
+            duration: 1.5,
+            ease: 'power2.out',
+            onUpdate: function () {
+                if (isCurrency) {
+                    el.textContent = 'L. ' + obj.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                } else {
+                    el.textContent = Math.round(obj.value).toLocaleString('en-US');
+                }
+            }
+        });
+    });
+});
+</script>
 
 <!-- CHART.JS -->
 <script>
@@ -607,6 +431,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     data: <?php echo $chartDonaData; ?>,
                     backgroundColor: [
                         'rgba(251,191,36,.75)',
+                        'rgba(45,212,191,.75)',
                         'rgba(56,189,248,.75)',
                         'rgba(139,92,246,.75)',
                         'rgba(16,185,129,.75)',
@@ -635,6 +460,4 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+<?php require_once __DIR__ . '/includes/admin_footer.php'; ?>

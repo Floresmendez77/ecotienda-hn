@@ -212,6 +212,7 @@ require_once __DIR__ . '/includes/navbar.php';
 <script>
 const API_URL  = '<?php echo BASE_URL; ?>api/carrito.php';
 const BASE_URL = '<?php echo BASE_URL; ?>';
+const CSRF_TOKEN = '<?php echo addslashes(generateCsrfToken()); ?>';
 
 // ── Toast de notificaciones ──────────────────────────────────────────────
 function showToast(msg, type = 'success') {
@@ -287,7 +288,7 @@ async function setCantidad(producto_id, cantidad) {
     try {
         const res  = await fetch(API_URL, {
             method:  'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
             body:    JSON.stringify({ producto_id, cantidad }),
         });
         const json = await res.json();
@@ -326,7 +327,7 @@ async function eliminarProducto(producto_id) {
     try {
         const res  = await fetch(API_URL + '?producto_id=' + producto_id, {
             method:  'DELETE',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
         });
         const json = await res.json();
 
@@ -363,7 +364,7 @@ async function vaciarBolsa() {
         promises.push(
             fetch(API_URL + '?producto_id=' + pid, {
                 method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
             }).then(r => r.json())
         );
     }

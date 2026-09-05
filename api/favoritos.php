@@ -24,6 +24,16 @@ if (!isLoggedIn()) {
 $user_id = (int)$_SESSION['user_id'];
 $method  = $_SERVER['REQUEST_METHOD'];
 
+// Protección CSRF solo en POST (el toggle cambia datos); GET es solo lectura.
+if ($method === 'POST') {
+    $csrfHeader = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+    if (!verifyCsrfToken($csrfHeader)) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'message' => 'Token de seguridad inválido o expirado. Recargá la página.'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+}
+
 try {
     $db = Database::getConnection();
 
